@@ -35,6 +35,7 @@ Usage:
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import json
+import logging
 from difflib import SequenceMatcher
 
 from .platforms import (
@@ -46,6 +47,8 @@ from .platforms import (
     PlatformNotFoundError,
     PlatformAPIError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class BeeckerAPIError(Exception):
@@ -1034,17 +1037,9 @@ class BeeckerAPI:
         except Exception as e:
             raise BeeckerAPIError(f"Error al obtener status de run_id={run_id}: {e}")
 
-    async def _find_run_in_history(
-        self,
-        bot_id: str,
-        run_id: int,
-        max_pages: int = 10,
-    ) -> Dict[str, Any]:
-        """
-        Busca un run_id específico paginando el historial del bot.
-        Devuelve un stub mínimo si no lo encuentra.
-        """
+    async def _find_run_in_history(self, bot_id: str, run_id: int, max_pages: int = 10) -> Dict[str, Any]:
         run_id_str = str(run_id)
+        logger.info(f"🔍 Buscando run_id={run_id_str} en historial de bot_id='{bot_id}'")
 
         for page in range(1, max_pages + 1):
             try:
@@ -1052,21 +1047,18 @@ class BeeckerAPI:
             except BeeckerAPIError:
                 break
 
-            for run in history.get("results", []):
+            results = history.get("results", [])
+            logger.info(f"  Página {page}: {len(results)} resultados — run_ids: {[r.get('run_id') for r in results]}")
+
+            for run in results:
                 if str(run.get("run_id", "")) == run_id_str:
                     return run
 
             if not history.get("next"):
                 break
 
-        return {
-            "process_id": bot_id,
-            "run_id":     run_id,
-            "run_state":  "unknown",
-            "start_run":  None,
-            "end_run":    None,
-            "details":    None,
-        }
+        logger.warning(f"  ⚠️ run_id={run_id} NO encontrado para bot_id='{bot_id}'")
+        return {"process_id": bot_id, "run_id": run_id, "run_state": "unknown", "start_run": None, "end_run": None, "details": None}
 
     def _compute_elapsed_minutes(
         self,
