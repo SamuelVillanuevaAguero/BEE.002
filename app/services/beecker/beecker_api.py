@@ -879,3 +879,242 @@ class BeeckerAPI:
                 })
 
         return sorted(groups, key=lambda g: g["count"], reverse=True)
+    
+# ------------------------------------------------------------------
+    # RPA — Status completo de una ejecución  (AGREGAR en beecker_api.py)
+    # ------------------------------------------------------------------
+
+    async def get_rpa_status(
+        self,
+        run_id: int,
+        bot_id: str,
+        avg_minutes_per_transaction: Optional[float] = None,
+        similarity_threshold: float = 0.80,
+        status_field: str = "status",
+        details_field: str = "details",
+        failed_value: str = "failed",
+    ) -> Dict[str, Any]:
+        """
+        Devuelve un snapshot completo del estado de una ejecución RPA.
+
+        Combina historial + transacciones para producir un dict compatible
+        con RPAMessageBuilder.build().
+
+        Args:
+            run_id:                      ID numérico de la ejecución en Beecker.
+            bot_id:                      ID del bot (id_beecker, ej. "aec.002").
+            avg_minutes_per_transaction: Referencia histórica precomputada (opcional).
+            similarity_threshold:        Umbral de similitud para agrupar errores.
+            status_field:                Campo de estado en transacciones.
+            details_field:               Campo de detalle/error en transacciones.
+            failed_value:                Valor que indica fallo en status_field.
+
+        Returns:
+            {
+                "run_id":                      int,
+                "bot_id":                      str,
+                "start_run":                   str | None,
+                "end_run":                     str | None,
+                "elapsed_minutes":             float,
+                "run_state":                   str,
+                "details":                     str | None,
+                "total_transactions":          int,
+                "completed_transactions":      int,
+                "failed_transactions":         int,
+                "completion_percentage":       float,
+                "failed_percentage":           float,
+                "avg_minutes_per_transaction": float,
+                "reference_avg_minutes":       float | None,
+                "overtime_flag":               bool | None,
+                "error_groups":                list[dict],
+            }
+        """
+        try:
+            # ── 1. Buscar el run en el historial ──────────────────────────────
+            run_info  = await self._find_run_in_history(bot_id=bot_id, run_id=run_id)
+            start_run = run_info.get("start_run")
+            end_run   = run_info.get("end_run")
+            run_state = run_info.get("run_state", "unknown")
+            details   = run_info.get("details")
+
+            # ── 2. Tiempo transcurrido ─────────────────────────────────────────
+            elapsed_minutes = self._compute_elapsed_minutes(
+                start_run=start_run,
+                end_run=end_run,
+            )
+
+            # ── 3. Transacciones ───────────────────────────────────────────────
+            trans_stats: Dict[str, Any] = {
+                "count_data":           0,
+                "complete_count":       0,
+                "failed_count":         0,
+                "completed_percentage": 0.0,
+                "failed_percentage":    0.0,
+            }
+            all_transactions: List[Dict] = []
+
+            if run_state.lower() != "failed":
+                try:
+                    raw              = await self.get_all_transactions(run_id=run_id)
+                    all_transactions = raw.get("transactions", [])
+                    stats            = raw.get("statistics", {})
+                    trans_stats = {
+                        "count_data":           stats.get("count_data", len(all_transactions)),
+                        "complete_count":       stats.get("complete_count", 0),
+                        "failed_count":         stats.get("failed_count", 0),
+                        "completed_percentage": stats.get("completed_percentage", 0.0),
+                        "failed_percentage":    stats.get("failed_percentage", 0.0),
+                    }
+                except BeeckerAPIError as e:
+                    if "404" not in str(e):
+                        raise
+
+            total_transactions     = trans_stats["count_data"] or 0
+            completed_transactions = trans_stats["complete_count"] or 0
+            failed_transactions    = trans_stats["failed_count"] or 0
+            completion_pct         = trans_stats["completed_percentage"] or 0.0
+            failed_pct             = trans_stats["failed_percentage"] or 0.0
+
+            # ── 4. Promedio real de esta ejecución ─────────────────────────────
+            avg_current = 0.0
+            if total_transactions > 0 and elapsed_minutes > 0:
+                avg_current = round(elapsed_minutes / total_transactions, 4)
+
+            # ── 5. Referencia histórica (excluyendo run_id actual) ─────────────
+            reference_avg: Optional[float] = avg_minutes_per_transaction
+            if reference_avg is None:
+                try:
+                    analysis  = await self.get_execution_performance_analysis(
+                        bot_id=bot_id,
+                        min_completion_percentage=90.0,
+                        max_executions=3,
+                        exclude_run_id=int(run_id),
+                    )
+                    ref = analysis.get("avg_minutes_transaction", 0.0)
+                    reference_avg = ref if ref > 0 else None
+                except BeeckerAPIError:
+                    reference_avg = None
+
+            # ── 6. Bandera de overtime ─────────────────────────────────────────
+            overtime_flag: Optional[bool] = None
+            if reference_avg is not None and total_transactions > 0 and elapsed_minutes > 0:
+                expected      = reference_avg * total_transactions
+                overtime_flag = elapsed_minutes > expected
+
+            # ── 7. Agrupación de errores ───────────────────────────────────────
+            error_groups = self._group_errors(
+                transactions=all_transactions,
+                status_field=status_field,
+                details_field=details_field,
+                failed_value=failed_value,
+                threshold=similarity_threshold,
+            )
+
+            return {
+                "run_id":                      run_id,
+                "bot_id":                      bot_id,
+                "start_run":                   start_run,
+                "end_run":                     end_run,
+                "elapsed_minutes":             elapsed_minutes,
+                "run_state":                   run_state,
+                "details":                     details,
+                "total_transactions":          total_transactions,
+                "completed_transactions":      completed_transactions,
+                "failed_transactions":         failed_transactions,
+                "completion_percentage":       completion_pct,
+                "failed_percentage":           failed_pct,
+                "avg_minutes_per_transaction": avg_current,
+                "reference_avg_minutes":       reference_avg,
+                "overtime_flag":               overtime_flag,
+                "error_groups":                error_groups,
+            }
+
+        except BeeckerAPIError:
+            raise
+        except Exception as e:
+            raise BeeckerAPIError(f"Error al obtener status de run_id={run_id}: {e}")
+
+    async def _find_run_in_history(
+        self,
+        bot_id: str,
+        run_id: int,
+        max_pages: int = 10,
+    ) -> Dict[str, Any]:
+        """
+        Busca un run_id específico paginando el historial del bot.
+        Devuelve un stub mínimo si no lo encuentra.
+        """
+        run_id_str = str(run_id)
+
+        for page in range(1, max_pages + 1):
+            try:
+                history = await self.get_run_history(bot_id=bot_id, page_size=50, page=page)
+            except BeeckerAPIError:
+                break
+
+            for run in history.get("results", []):
+                if str(run.get("run_id", "")) == run_id_str:
+                    return run
+
+            if not history.get("next"):
+                break
+
+        return {
+            "process_id": bot_id,
+            "run_id":     run_id,
+            "run_state":  "unknown",
+            "start_run":  None,
+            "end_run":    None,
+            "details":    None,
+        }
+
+    def _compute_elapsed_minutes(
+        self,
+        start_run: Optional[str],
+        end_run: Optional[str],
+    ) -> float:
+        """Calcula minutos entre start_run y end_run (usa now() si end_run es None)."""
+        start_dt = self._parse_datetime_flexible(start_run)
+        if start_dt is None:
+            return 0.0
+        ref_dt = self._parse_datetime_flexible(end_run) if end_run else datetime.now()
+        if ref_dt is None:
+            ref_dt = datetime.now()
+        return round(max((ref_dt - start_dt).total_seconds() / 60, 0.0), 2)
+
+    def _group_errors(
+        self,
+        transactions: List[Dict],
+        status_field: str,
+        details_field: str,
+        failed_value: str,
+        threshold: float,
+    ) -> List[Dict[str, Any]]:
+        """Agrupa mensajes de error por similitud semántica (SequenceMatcher)."""
+        groups: List[Dict[str, Any]] = []
+
+        for txn in transactions:
+            if txn.get(status_field) != failed_value:
+                continue
+            msg = str(txn.get(details_field, "")).strip()
+            if not msg:
+                continue
+
+            matched = False
+            for group in groups:
+                ratio = SequenceMatcher(None, group["representative"], msg).ratio()
+                if ratio >= threshold:
+                    group["count"] += 1
+                    group["indices"].append(txn.get("n"))
+                    matched = True
+                    break
+
+            if not matched:
+                groups.append({
+                    "representative": msg,
+                    "count":          1,
+                    "indices":        [txn.get("n")],
+                })
+
+        groups.sort(key=lambda g: g["count"], reverse=True)
+        return groups

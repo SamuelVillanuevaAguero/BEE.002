@@ -63,7 +63,8 @@ def _wrapped_task(job_id: str, task_path: str, **kwargs):
 
     try:
         func = _resolve_func(task_path)
-        output = func(**kwargs)
+        #output = func(**kwargs)
+        output = func(job_id=job_id, **kwargs) 
         finished_at = datetime.now(timezone.utc)
         duration_ms = int((finished_at - started_at).total_seconds() * 1000)
 

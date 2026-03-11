@@ -1,0 +1,116 @@
+"""
+app/services/rpa_orchestration_service.py
+==========================================
+Servicio de orquestación para monitoreo RPA.
+
+Responsabilidades:
+- Cargar configuración desde rpa_dashboard_client (por id_beecker)
+- Construir RPAConfig dinámicamente
+- Delegar a MonitoringAgent para enviar mensajes a Slack
+- Soportar bee_informa (inicio + fin) y bee_observa (futuro)
+"""
+
+import logging
+from sqlalchemy.orm import Session, joinedload
+
+from app.models.automation import RPADashboardClient, MonitorType
+from app.services.monitoring_service import MonitoringAgent
+from app.services.config.rpa_config import RPAConfig
+
+logger = logging.getLogger(__name__)
+
+
+# ── Helpers privados ──────────────────────────────────────────────────────────
+
+def _load_relation(db: Session, bot_id: str) -> RPADashboardClient:
+    relation = (
+        db.query(RPADashboardClient)
+        .options(
+            joinedload(RPADashboardClient.rpa),
+            joinedload(RPADashboardClient.client),
+        )
+        .filter(RPADashboardClient.id_rpa == bot_id)
+        .first()
+    )
+
+    if relation is None:
+        raise RuntimeError(
+            f"No se encontró configuración en rpa_dashboard_client "
+            f"para bot_id='{bot_id}'"
+        )
+
+    return relation
+
+def _build_config(relation: RPADashboardClient) -> RPAConfig:
+    """Construye RPAConfig dinámicamente desde los datos de la DB."""
+    rpa = relation.rpa
+
+    raw_unit = relation.transaction_unit or "transacciones|transacción"
+    parts    = raw_unit.split("|")
+    unit_plural   = parts[0].strip()
+    unit_singular = parts[1].strip() if len(parts) > 1 else parts[0].strip()
+
+    mention_emails: list[str] = relation.roc_agents or []
+
+    return RPAConfig(
+        bot_name=rpa.id_beecker,
+        process_name=rpa.process_name,
+        transaction_unit=unit_plural,
+        transaction_unit_singular=unit_singular,
+        channel_name=relation.slack_channel or "",
+        mention_emails=mention_emails,
+        platform=rpa.platform.value,
+        enable_chart=True,
+        enable_freshdesk_link=False,
+    )
+
+
+# ── API pública ───────────────────────────────────────────────────────────────
+
+async def handle_execution_start(db: Session, run_id: str, bot_id: str) -> None:
+    """
+    Maneja el inicio de una ejecución RPA.
+
+    - Carga config desde DB
+    - Envía mensaje de inicio a Slack via send_initial_rpa()
+
+    Args:
+        db:     Sesión de DB.
+        run_id: ID de la ejecución en Beecker (recibido del payload).
+        bot_id: id_beecker del RPA (ej. "aec.002").
+    """
+    logger.info(f"🐝 [START] bot_id={bot_id} | run_id={run_id}")
+
+    relation = _load_relation(db, bot_id)
+    config   = _build_config(relation)
+
+    monitoring = MonitoringAgent()
+    await monitoring.load_config(config)
+    await monitoring.send_initial_rpa(bot_id=bot_id)
+
+    logger.info(f"✅ [START] Mensaje de inicio enviado | bot_id={bot_id}")
+
+
+async def handle_execution_end(db: Session, run_id: str, bot_id: str) -> None:
+    """
+    Maneja la finalización de una ejecución RPA.
+
+    - Carga config desde DB
+    - Consulta el status completo en Beecker
+    - Envía mensaje de fin a Slack via send_status_rpa()
+
+    Args:
+        db:     Sesión de DB.
+        run_id: ID numérico de la ejecución en Beecker.
+        bot_id: id_beecker del RPA (ej. "aec.002").
+    """
+    logger.info(f"🐝 [END] bot_id={bot_id} | run_id={run_id}")
+
+    relation = _load_relation(db, bot_id)
+    config   = _build_config(relation)
+
+    monitoring = MonitoringAgent()
+    await monitoring.load_config(config)
+    await monitoring.send_status_rpa(run_id=int(run_id), bot_id=bot_id)
+
+    logger.info(f"✅ [END] Mensaje de fin enviado | bot_id={bot_id} | run_id={run_id}")
