@@ -45,11 +45,11 @@ from .slack.slack_api import (
 )
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
-from services.config.rpa_config import RPAConfig
-from services.config.agent_config import AgentConfig
-from slack_message_builder import RPAMessageBuilder
-from agent_message_builder import AgentMessageBuilder
-from chart_builder import RPAChartBuilder, AgentChartBuilder
+from app.services.config.rpa_config import RPAConfig
+from app.services.config.agent_config import AgentConfig
+from .slack_message_builder import RPAMessageBuilder
+from .agent_message_builder import AgentMessageBuilder
+from .chart_builder import RPAChartBuilder, AgentChartBuilder
 
 load_dotenv()
 

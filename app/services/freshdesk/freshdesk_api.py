@@ -1,5 +1,5 @@
 from urllib.parse import urlencode
-from utils.http_client import HttpClient
+from app.utils.http_client import HttpClient
 
 
 class FreshDeskError(Exception):

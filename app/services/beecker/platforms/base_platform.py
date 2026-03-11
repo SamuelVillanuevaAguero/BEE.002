@@ -69,7 +69,7 @@ Agent — Progress response:
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 
-from utils.http_client import HttpClient
+from app.utils.http_client import HttpClient
 
 
 class BasePlatform(ABC):

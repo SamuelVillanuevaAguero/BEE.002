@@ -1,7 +1,7 @@
 from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
-from utils.http_client import HttpClient
+from app.utils.http_client import HttpClient
 
 
 class SlackError(Exception):
