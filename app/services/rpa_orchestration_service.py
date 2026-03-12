@@ -17,6 +17,16 @@ from app.models.automation import RPADashboardClient, MonitorType
 from app.services.monitoring_service import MonitoringAgent
 from app.services.config.rpa_config import RPAConfig
 
+import asyncio
+
+from sqlalchemy.orm import Session
+from app.services.beecker.beecker_api import RunNotYetAvailableError, BeeckerAPIError
+
+logger = logging.getLogger(__name__)
+
+# Configuración del retry
+_RETRY_DELAYS_SECONDS = [10, 30, 60]  # 3 intentos: 30s, 1min, 2min
+
 logger = logging.getLogger(__name__)
 
 
@@ -92,25 +102,75 @@ async def handle_execution_start(db: Session, run_id: str, bot_id: str) -> None:
 
 
 async def handle_execution_end(db: Session, run_id: str, bot_id: str) -> None:
-    """
-    Maneja la finalización de una ejecución RPA.
-
-    - Carga config desde DB
-    - Consulta el status completo en Beecker
-    - Envía mensaje de fin a Slack via send_status_rpa()
-
-    Args:
-        db:     Sesión de DB.
-        run_id: ID numérico de la ejecución en Beecker.
-        bot_id: id_beecker del RPA (ej. "aec.002").
-    """
     logger.info(f"🐝 [END] bot_id={bot_id} | run_id={run_id}")
 
     relation = _load_relation(db, bot_id)
     config   = _build_config(relation)
 
-    monitoring = MonitoringAgent()
-    await monitoring.load_config(config)
-    await monitoring.send_status_rpa(run_id=int(run_id), bot_id=bot_id)
+    try:
+        monitoring = MonitoringAgent()
+        await monitoring.load_config(config)
+        await monitoring.send_status_rpa(run_id=int(run_id), bot_id=bot_id)
+        logger.info(f"✅ [END] Mensaje de fin enviado | bot_id={bot_id} | run_id={run_id}")
 
-    logger.info(f"✅ [END] Mensaje de fin enviado | bot_id={bot_id} | run_id={run_id}")
+    except RunNotYetAvailableError:
+        logger.warning(
+            f"⏳ [END] run_id={run_id} no disponible aún en Beecker. "
+            f"Lanzando retry en background | bot_id={bot_id}"
+        )
+        asyncio.create_task(
+            _retry_execution_end(config=config, run_id=run_id, bot_id=bot_id)
+        )
+
+    except BeeckerAPIError as e:
+        # Captura errores de conexión en el intento inicial (ej. login falló)
+        error_str = str(e).lower()
+        if "connection error" in error_str or "no se puede conectar" in error_str:
+            logger.warning(
+                f"⏳ [END] Error de conexión en intento inicial, lanzando retry | "
+                f"bot_id={bot_id} | run_id={run_id} | {e}"
+            )
+            asyncio.create_task(
+                _retry_execution_end(config=config, run_id=run_id, bot_id=bot_id)
+            )
+        else:
+            logger.error(f"❌ [END] Error no recuperable | bot_id={bot_id} | run_id={run_id} | {e}")
+            raise
+
+
+async def _retry_execution_end(config: RPAConfig, run_id: str, bot_id: str) -> None:
+    """
+    Reintenta send_status_rpa en background con delays crecientes.
+    No bloquea el flujo principal. Se ejecuta hasta 3 veces.
+    """
+    for attempt, delay in enumerate(_RETRY_DELAYS_SECONDS, start=1):
+        logger.info(
+            f"🔁 [RETRY {attempt}/{len(_RETRY_DELAYS_SECONDS)}] "
+            f"Esperando {delay}s antes de reintentar | bot_id={bot_id} | run_id={run_id}"
+        )
+        await asyncio.sleep(delay)
+
+        try:
+            monitoring = MonitoringAgent()
+            await monitoring.load_config(config)
+            await monitoring.send_status_rpa(run_id=int(run_id), bot_id=bot_id)
+            logger.info(
+                f"✅ [RETRY {attempt}] Mensaje de fin enviado | bot_id={bot_id} | run_id={run_id}"
+            )
+            return  # ← éxito, salimos
+
+        except RunNotYetAvailableError:
+            logger.warning(
+                f"⚠️ [RETRY {attempt}] run_id={run_id} sigue sin aparecer en Beecker | bot_id={bot_id}"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"❌ [RETRY {attempt}] Error inesperado | bot_id={bot_id} | run_id={run_id} | {e}"
+            )
+            return  # Error distinto al de disponibilidad, no tiene sentido seguir
+
+    logger.error(
+        f"❌ [RETRY AGOTADO] run_id={run_id} nunca apareció en Beecker "
+        f"tras {len(_RETRY_DELAYS_SECONDS)} intentos | bot_id={bot_id}"
+    )

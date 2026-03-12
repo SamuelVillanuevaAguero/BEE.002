@@ -40,6 +40,7 @@ from app.services.config.agent_config import AgentConfig
 from .slack_message_builder import RPAMessageBuilder
 from .agent_message_builder import AgentMessageBuilder
 from .chart_builder import RPAChartBuilder, AgentChartBuilder
+from .beecker.beecker_api import RunNotYetAvailableError
 
 load_dotenv()
 
@@ -337,6 +338,9 @@ class MonitoringAgent:
             run_state = (status.get("run_state") or "").lower().strip()
             if config.enable_chart and run_state not in _RPA_IN_PROGRESS_STATES:
                 await self._send_rpa_chart(status=status, config=config)
+
+        except RunNotYetAvailableError:   # ← agregar antes del except genérico
+            raise
 
         except Exception as e:
             await self._send_error_to_slack(

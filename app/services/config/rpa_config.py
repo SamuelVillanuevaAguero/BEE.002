@@ -138,8 +138,8 @@ class RPAConfig:
     enable_chart: bool = True
 
     # ── Beecker credentials ─────────────────────────────────────────────────────
-    email_dash: str = "roc@beecker.ai"
-    password_dash: str = "Z^t8)IE:146_"
+    email_dash: str = "bee.roc@beecker.ai"
+    password_dash: str = "@Beecker20.26"
     platform: str = "cloud"
 
     # ── Third-party credentials (loaded from environment variables) ─────────────

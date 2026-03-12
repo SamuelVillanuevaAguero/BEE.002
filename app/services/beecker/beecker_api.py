@@ -60,6 +60,19 @@ class BeeckerAPIError(Exception):
     do not depend on the internal implementation details of each platform.
     """
 
+# ── Excepción nueva — agregar junto a BeeckerAPIError ─────────────────────────
+
+class RunNotYetAvailableError(Exception):
+    """
+    Se lanza cuando el run_id aún no aparece en el historial de Beecker.
+    Indica que la ejecución terminó pero Beecker todavía no la registró.
+    """
+    def __init__(self, run_id: int, bot_id: str):
+        self.run_id = run_id
+        self.bot_id = bot_id
+        super().__init__(
+            f"run_id={run_id} para bot_id='{bot_id}' aún no disponible en el historial de Beecker."
+        )
 
 class BeeckerAPI:
     """
@@ -1034,32 +1047,35 @@ class BeeckerAPI:
 
         except BeeckerAPIError:
             raise
+        except RunNotYetAvailableError:   # ← agregar ANTES del except genérico
+            raise
         except Exception as e:
             raise BeeckerAPIError(f"Error al obtener status de run_id={run_id}: {e}")
 
     async def _find_run_in_history(self, bot_id: str, run_id: int, max_pages: int = 10) -> Dict[str, Any]:
-        run_id_str = str(run_id)
-        logger.info(f"🔍 Buscando run_id={run_id_str} en historial de bot_id='{bot_id}'")
+            run_id_str = str(run_id)
+            logger.info(f"🔍 Buscando run_id={run_id_str} en historial de bot_id='{bot_id}'")
 
-        for page in range(1, max_pages + 1):
-            try:
-                history = await self.get_run_history(bot_id=bot_id, page_size=50, page=page)
-            except BeeckerAPIError:
-                break
+            for page in range(1, max_pages + 1):
+                try:
+                    history = await self.get_run_history(bot_id=bot_id, page_size=50, page=page)
+                except BeeckerAPIError:
+                    break
 
-            results = history.get("results", [])
-            logger.info(f"  Página {page}: {len(results)} resultados — run_ids: {[r.get('run_id') for r in results]}")
+                results = history.get("results", [])
+                logger.info(f"  Página {page}: {len(results)} resultados — run_ids: {[r.get('run_id') for r in results]}")
 
-            for run in results:
-                if str(run.get("run_id", "")) == run_id_str:
-                    return run
+                for run in results:
+                    if str(run.get("run_id", "")) == run_id_str:
+                        return run
 
-            if not history.get("next"):
-                break
+                if not history.get("next"):
+                    break
 
-        logger.warning(f"  ⚠️ run_id={run_id} NO encontrado para bot_id='{bot_id}'")
-        return {"process_id": bot_id, "run_id": run_id, "run_state": "unknown", "start_run": None, "end_run": None, "details": None}
-
+            # ── Antes retornaba dict vacío; ahora avisa explícitamente ────────────
+            logger.warning(f"  ⚠️ run_id={run_id} NO encontrado para bot_id='{bot_id}'")
+            raise RunNotYetAvailableError(run_id=run_id, bot_id=bot_id)
+    
     def _compute_elapsed_minutes(
         self,
         start_run: Optional[str],
