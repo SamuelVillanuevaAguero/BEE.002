@@ -2,49 +2,73 @@
 Asynchronous HTTP client wrapper built on top of httpx.
 
 Provides a lightweight utility for performing HTTP requests with support
-for persistent headers (similar to requests.Session). This allows shared
-headers such as Authorization tokens to be reused across multiple requests.
+for persistent headers and configurable automatic retries (similar to
+axios-retry in JS).
 
-Example::
+Retry behavior (configurable via .env):
+    HTTP_RETRY_MAX          → number of retry attempts (default: 2)
+    HTTP_RETRY_BACKOFF      → base seconds for exponential backoff (default: 1.0)
+    HTTP_RETRY_ON_STATUS    → comma-separated HTTP status codes to retry (default: 429,502,503,504)
 
-    client = HttpClient()
-    client.set_header("Authorization", "Bearer token123")
+Retries are triggered by:
+    - Connection errors    (status_code = 0)
+    - Configured HTTP codes (e.g. 429, 502, 503, 504)
 
-    result = await client.post(
-        "https://api.example.com/endpoint",
-        json={"key": "value"}
-    )
+Non-retriable errors (400, 401, 403, 404, 500, etc.) fail immediately.
 """
 
+import asyncio
+import logging
+from typing import Any, Dict, Optional
+
 import httpx
-from typing import Optional, Dict, Any
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_retry_statuses(raw: str) -> set[int]:
+    """Parse comma-separated status codes string into a set of ints."""
+    result = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            result.add(int(part))
+    return result
 
 
 class HttpClient:
     """
-    Asynchronous HTTP client with support for persistent headers.
+    Asynchronous HTTP client with persistent headers and automatic retries.
 
-    The client maintains a set of base headers that are automatically included
-    in every request. These headers can be modified dynamically during runtime,
-    which is useful for authentication tokens or shared request metadata.
+    Retry policy (loaded from settings at instantiation):
+        - Retries on connection errors (status_code = 0) and configured HTTP codes.
+        - Exponential backoff: wait = backoff * (2 ** attempt).
+        - Non-retriable errors fail immediately without consuming retry budget.
     """
 
     def __init__(self):
         self._base_headers: Dict[str, str] = {
             "Content-Type": "application/json",
         }
+        self._max_retries: int         = settings.HTTP_RETRY_MAX
+        self._backoff: float           = settings.HTTP_RETRY_BACKOFF
+        self._retry_statuses: set[int] = _parse_retry_statuses(settings.HTTP_RETRY_ON_STATUS)
+        self._timeout: float           = settings.HTTP_TIMEOUT
 
     def set_header(self, key: str, value: str) -> None:
-        """Add or update a persistent header."""
         self._base_headers[key] = value
 
     def set_headers(self, headers: Dict[str, str]) -> None:
-        """Update multiple persistent headers at once."""
         self._base_headers.update(headers)
 
     def clear_auth(self) -> None:
-        """Remove the Authorization header (useful during logout or token refresh)."""
         self._base_headers.pop("Authorization", None)
+
+    def _should_retry(self, status_code: int) -> bool:
+        """Return True if the response warrants a retry attempt."""
+        return status_code == 0 or status_code in self._retry_statuses
 
     async def fetch(
         self,
@@ -56,85 +80,102 @@ class HttpClient:
         data: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """
-        Perform an HTTP request using the specified method.
+        Perform an HTTP request with automatic retry support.
 
-        This method merges the base headers configured in the client with
-        request-specific headers and executes the request using httpx.AsyncClient.
-
-        Args:
-            method: HTTP method (GET, POST, PUT, DELETE, etc.).
-            url: Target endpoint URL.
-            headers: Optional request-specific headers.
-            params: Optional query parameters.
-            json: Optional JSON body payload.
-            data: Optional form data payload.
+        Retries are attempted with exponential backoff for connection errors
+        and configured HTTP status codes. All other errors fail immediately.
 
         Returns:
-            Dictionary containing:
-                success:     Whether the request succeeded.
-                status_code: HTTP response status code.
-                data:        Parsed JSON response or raw text.
-                headers:     Response headers (only on success).
-                error:       Error message when success=False.
+            Dictionary with keys: success, status_code, data, headers, error.
         """
-
         merged_headers = {**self._base_headers, **(headers or {})}
+        last_result: Dict[str, Any] = {}
 
-        async with httpx.AsyncClient() as client:
-            try:
-                print(f"fetching {method} {url}")
-                response = await client.request(
-                    method=method,
-                    url=url,
-                    headers=merged_headers,
-                    params=params or {},
-                    data=data or {},
-                    json=json,
-                )
-                response.raise_for_status()
+        for attempt in range(self._max_retries + 1):
 
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
                 try:
-                    content = response.json()
-                except Exception:
-                    content = response.text
+                    logger.debug(f"fetching {method} {url}" + (f" (retry {attempt})" if attempt else ""))
+                    print(f"fetching {method} {url}")
 
-                print(f"Response {response.status_code}")
-                return {
-                    "success": True,
-                    "status_code": response.status_code,
-                    "data": content,
-                    "headers": dict(response.headers),
-                }
+                    response = await client.request(
+                        method=method,
+                        url=url,
+                        headers=merged_headers,
+                        params=params or {},
+                        data=data or {},
+                        json=json,
+                    )
+                    response.raise_for_status()
 
-            except httpx.HTTPStatusError as e:
-                print(f"HTTP error {e.response.status_code}: {e}")
-                return {
-                    "success": False,
-                    "status_code": e.response.status_code,
-                    "error": str(e),
-                    "data": None,
-                }
-            except httpx.RequestError as e:
-                print(f"Request error: {str(e)}")
-                return {
-                    "success": False,
-                    "status_code": 0,
-                    "error": f"Connection error: {str(e)}",
-                    "data": None,
-                }
-            except Exception as e:
-                print(f"Unexpected error: {str(e)}")
-                return {
-                    "success": False,
-                    "status_code": 0,
-                    "error": f"Unexpected error: {str(e)}",
-                    "data": None,
-                }
+                    try:
+                        content = response.json()
+                    except Exception:
+                        content = response.text
+
+                    print(f"Response {response.status_code}")
+                    return {
+                        "success":     True,
+                        "status_code": response.status_code,
+                        "data":        content,
+                        "headers":     dict(response.headers),
+                    }
+
+                except httpx.HTTPStatusError as e:
+                    status_code = e.response.status_code
+                    print(f"HTTP error {status_code}: {e}")
+                    last_result = {
+                        "success":     False,
+                        "status_code": status_code,
+                        "error":       str(e),
+                        "data":        None,
+                    }
+
+                except httpx.RequestError as e:
+                    print(f"Request error: {str(e)}")
+                    last_result = {
+                        "success":     False,
+                        "status_code": 0,
+                        "error":       f"Connection error: {str(e)}",
+                        "data":        None,
+                    }
+
+                except Exception as e:
+                    print(f"Unexpected error: {str(e)}")
+                    last_result = {
+                        "success":     False,
+                        "status_code": 0,
+                        "error":       f"Unexpected error: {str(e)}",
+                        "data":        None,
+                    }
+
+            # ── Decidir si reintentar ────────────────────────────────────────
+            status_code = last_result["status_code"]
+
+            if not self._should_retry(status_code):
+                # Error no retriable (400, 401, 403, 404, 500...) → fallo inmediato
+                return last_result
+
+            if attempt < self._max_retries:
+                wait = self._backoff * (2 ** attempt)  # 1s, 2s, 4s ...
+                logger.warning(
+                    f"[HttpClient] Reintento {attempt + 1}/{self._max_retries} "
+                    f"en {wait:.1f}s para {url}... (status={status_code})"
+                )
+                print(
+                    f"[CloudPlatform] Reintento {attempt + 1}/{self._max_retries} "
+                    f"en {wait:.0f}s para {url}..."
+                )
+                await asyncio.sleep(wait)
+
+        logger.error(
+            f"[HttpClient] Agotados {self._max_retries} reintentos para {url} "
+            f"(último status={last_result.get('status_code')})"
+        )
+        return last_result
 
     async def get(self, url: str, **kwargs) -> Dict[str, Any]:
-        """Shortcut method for performing a GET request."""
         return await self.fetch("GET", url, **kwargs)
 
     async def post(self, url: str, **kwargs) -> Dict[str, Any]:
-        """Shortcut method for performing a POST request."""
         return await self.fetch("POST", url, **kwargs)

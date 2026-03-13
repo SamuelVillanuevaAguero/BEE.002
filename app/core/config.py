@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     SCHEDULER_COALESCE: bool = True
     SCHEDULER_MAX_INSTANCES: int = 3
 
+    # HTTP Retries
+    HTTP_RETRY_MAX: int = 2
+    HTTP_RETRY_BACKOFF: float = 1.0
+    HTTP_RETRY_ON_STATUS: str = "429,502,503,504"
+    HTTP_TIMEOUT: float = 30.0
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

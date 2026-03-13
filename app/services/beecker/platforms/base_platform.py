@@ -375,42 +375,29 @@ class BasePlatform(ABC):
         PlatformAPIError
             Any other HTTP error.
         """
-        import asyncio
+        result = await self._http.post(endpoint, json=payload, params=params or {})
 
-        for attempt in range(retries + 1):
-            result = await self._http.post(endpoint, json=payload, params=params or {})
+        if result["success"]:
+            return result["data"]
 
-            if result["success"]:
-                return result["data"]
+        status = result["status_code"]
+        error  = result.get("error", "")
 
-            status = result["status_code"]
-            error  = result.get("error", "")
-
-            # Reintentar solo en errores de conexión (status = 0)
-            if status == 0 and attempt < retries:
-                wait = 2 ** attempt  # backoff: 1s, 2s
-                print(
-                    f"[{self.__class__.__name__}] Reintento {attempt + 1}/{retries} "
-                    f"en {wait}s para {endpoint}..."
-                )
-                await asyncio.sleep(wait)
-                continue
-
-            if status == 0:
-                raise PlatformConnectionError(
-                    f"[{self.__class__.__name__}] No se puede conectar a {endpoint}: {error}"
-                )
-            if status == 404:
-                raise PlatformNotFoundError(
-                    f"[{self.__class__.__name__}] 404 Not Found: {endpoint}"
-                )
-            if status in (401, 403):
-                raise PlatformAuthError(
-                    f"[{self.__class__.__name__}] {status} No autorizado: {endpoint}"
-                )
-            raise PlatformAPIError(
-                f"[{self.__class__.__name__}] Error {status} en petición a {endpoint}: {error}"
+        if status == 0:
+            raise PlatformConnectionError(
+                f"[{self.__class__.__name__}] No se puede conectar a {endpoint}: {error}"
             )
+        if status == 404:
+            raise PlatformNotFoundError(
+                f"[{self.__class__.__name__}] 404 Not Found: {endpoint}"
+            )
+        if status in (401, 403):
+            raise PlatformAuthError(
+                f"[{self.__class__.__name__}] {status} No autorizado: {endpoint}"
+            )
+        raise PlatformAPIError(
+            f"[{self.__class__.__name__}] Error {status} en petición a {endpoint}: {error}"
+        )
     
     async def _get(
         self,

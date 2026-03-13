@@ -836,6 +836,10 @@ class BeeckerAPI:
             return None
 
         formats = [
+            "%b %d, %Y, %I:%M:%S %p",   # Mar 12, 2026, 07:08:13 PM  ← este es el que falta
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M:%S",
+            "%d/%m/%Y %H:%M:%S",
             "%Y-%m-%d %H:%M:%S",
             "%Y-%m-%dT%H:%M:%S",
             "%Y-%m-%d, %H:%M:%S",   # ← NUEVO: formato de la API Cloud para agentes
