@@ -1,29 +1,21 @@
 """
 app/services/rpa_orchestration_service.py
 ==========================================
-Servicio de orquestación para monitoreo RPA.
-
-Responsabilidades:
-- Cargar configuración desde rpa_dashboard_client (por id_beecker)
-- Construir RPAConfig dinámicamente
-- Delegar a MonitoringAgent para enviar mensajes a Slack
-- Soportar bee_informa (inicio + fin) y bee_observa (futuro)
-
-Puntos de entrada públicos
---------------------------
+...
 handle_execution_start(db, run_id, bot_id)
-    → Invocado por el endpoint POST /rpa/execution
-    → Envía mensaje de inicio a Slack
-
-send_rpa_status(db, bot_id, run_id=None)
-    → Función GENÉRICA para enviar el status final de cualquier RPA
-    → Endpoint PUT /rpa/execution/{id}  : pasa run_id desde el payload
-    → Scheduler                         : omite run_id, se resuelve automáticamente
-      consultando el último run en Beecker via get_run_summary()
+    → bee_informa : envía mensaje de inicio
+    → bee_observa : envía mensaje de inicio + activa el job con el run_id específico
+                    (si el job ya está activo, ignora el nuevo inicio)
 
 handle_execution_end(db, run_id, bot_id)
-    → Mantiene compatibilidad con el endpoint existente
-    → Internamente delega a send_rpa_status()
+    → bee_informa : envía status final (comportamiento original)
+    → bee_observa : si el job aún está activo (endpoint llegó primero)
+                        → envía status + pausa el job
+                    si el job ya está pausado (scheduler llegó primero)
+                        → no hace nada (evitar duplicado)
+
+send_rpa_status(db, bot_id, run_id=None)  →  str | None
+    → Ahora retorna el run_state para que el scheduler pueda pausar al detectar fin
 """
 
 import asyncio
@@ -31,16 +23,16 @@ import logging
 
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.automation import RPADashboardClient
+from app.models.automation import MonitorType, RPADashboard, RPADashboardClient
+from app.models.job import Job, JobStatus
 from app.services.beecker.beecker_api import BeeckerAPI, BeeckerAPIError, RunNotYetAvailableError
 from app.services.config.rpa_config import RPAConfig
 from app.services.monitoring_service import MonitoringAgent
-from app.models.automation import RPADashboardClient, RPADashboard
 
 logger = logging.getLogger(__name__)
 
-# Delays entre reintentos: 10s → 30s → 60s  (3 intentos máximo)
 _RETRY_DELAYS_SECONDS = [10, 30, 60]
+_TERMINAL_STATES = {"completed", "failed"}
 
 
 # ── Helpers privados ──────────────────────────────────────────────────────────
@@ -52,18 +44,14 @@ def _load_relation(db: Session, bot_id: str) -> RPADashboardClient:
             joinedload(RPADashboardClient.rpa),
             joinedload(RPADashboardClient.client),
         )
-        .filter(RPADashboardClient.id_rpa == bot_id)  # ← filtro original
+        .filter(RPADashboardClient.id_rpa == bot_id)
         .first()
     )
-
     if relation is None:
         raise RuntimeError(
-            f"No se encontró configuración en rpa_dashboard_client "
-            f"para bot_id='{bot_id}'"
+            f"No se encontró configuración en rpa_dashboard_client para bot_id='{bot_id}'"
         )
-    
     return relation
-
 
 
 def _build_config(relation: RPADashboardClient) -> RPAConfig:
@@ -112,19 +100,21 @@ async def _resolve_latest_run_id(config: RPAConfig, bot_id: str) -> str:
     logger.info(f"🔍 [STATUS] run_id={run_id} resuelto automáticamente | bot_id={bot_id}")
     return run_id
 
-async def _dispatch_status(config: RPAConfig, run_id: str, bot_id: str) -> None:
-    """
-    Núcleo compartido: instancia MonitoringAgent, envía el status y
-    lanza retry en background si el run aún no está disponible en Beecker.
 
-    Extraído para evitar duplicación entre send_rpa_status() y
-    handle_execution_end().
+async def _dispatch_status(config: RPAConfig, run_id: str, bot_id: str) -> str | None:
+    """
+    Envía el status al Slack y retorna el run_state.
+
+    Returns:
+        run_state en minúsculas ('completed', 'failed', 'in progress', ...)
+        o None si el run no está disponible aún / error de conexión.
     """
     try:
         monitoring = MonitoringAgent()
         await monitoring.load_config(config)
-        await monitoring.send_status_rpa(run_id=int(run_id), bot_id=bot_id)
-        logger.info(f"✅ [STATUS] Mensaje enviado | bot_id={bot_id} | run_id={run_id}")
+        run_state = await monitoring.send_status_rpa(run_id=int(run_id), bot_id=bot_id)
+        logger.info(f"✅ [STATUS] Mensaje enviado | bot_id={bot_id} | run_id={run_id} | run_state={run_state}")
+        return run_state
 
     except RunNotYetAvailableError:
         logger.warning(
@@ -134,57 +124,46 @@ async def _dispatch_status(config: RPAConfig, run_id: str, bot_id: str) -> None:
         asyncio.create_task(
             _retry_execution_end(config=config, run_id=run_id, bot_id=bot_id)
         )
+        return None
 
     except BeeckerAPIError as e:
         error_str = str(e).lower()
         if "connection error" in error_str or "no se puede conectar" in error_str:
             logger.warning(
-                f"⏳ [STATUS] Error de conexión en intento inicial, lanzando retry | "
-                f"bot_id={bot_id} | run_id={run_id} | {e}"
+                f"⏳ [STATUS] Error de conexión, lanzando retry | bot_id={bot_id} | run_id={run_id} | {e}"
             )
             asyncio.create_task(
                 _retry_execution_end(config=config, run_id=run_id, bot_id=bot_id)
             )
+            return None
         else:
             logger.error(f"❌ [STATUS] Error no recuperable | bot_id={bot_id} | run_id={run_id} | {e}")
             raise
 
 
 async def _retry_execution_end(config: RPAConfig, run_id: str, bot_id: str) -> None:
-    """
-    Reintenta _dispatch_status en background con delays crecientes.
-    No bloquea el flujo principal. Máximo 3 intentos.
-    """
+    """Reintenta _dispatch_status en background. Sin cambios respecto al original."""
     for attempt, delay in enumerate(_RETRY_DELAYS_SECONDS, start=1):
         logger.info(
             f"🔁 [RETRY {attempt}/{len(_RETRY_DELAYS_SECONDS)}] "
-            f"Esperando {delay}s antes de reintentar | bot_id={bot_id} | run_id={run_id}"
+            f"Esperando {delay}s | bot_id={bot_id} | run_id={run_id}"
         )
         await asyncio.sleep(delay)
-
         try:
             monitoring = MonitoringAgent()
             await monitoring.load_config(config)
             await monitoring.send_status_rpa(run_id=int(run_id), bot_id=bot_id)
-            logger.info(
-                f"✅ [RETRY {attempt}] Mensaje enviado | bot_id={bot_id} | run_id={run_id}"
-            )
-            return  # éxito → salimos
-
+            logger.info(f"✅ [RETRY {attempt}] Mensaje enviado | bot_id={bot_id} | run_id={run_id}")
+            return
         except RunNotYetAvailableError:
-            logger.warning(
-                f"⚠️ [RETRY {attempt}] run_id={run_id} sigue sin aparecer en Beecker | bot_id={bot_id}"
-            )
-
+            logger.warning(f"⚠️ [RETRY {attempt}] run_id={run_id} sigue sin aparecer | bot_id={bot_id}")
         except Exception as e:
-            logger.error(
-                f"❌ [RETRY {attempt}] Error inesperado | bot_id={bot_id} | run_id={run_id} | {e}"
-            )
-            return  # Error distinto al de disponibilidad → no tiene sentido seguir
+            logger.error(f"❌ [RETRY {attempt}] Error inesperado | bot_id={bot_id} | {e}")
+            return
 
     logger.error(
-        f"❌ [RETRY AGOTADO] run_id={run_id} nunca apareció en Beecker "
-        f"tras {len(_RETRY_DELAYS_SECONDS)} intentos | bot_id={bot_id}"
+        f"❌ [RETRY AGOTADO] run_id={run_id} nunca apareció tras "
+        f"{len(_RETRY_DELAYS_SECONDS)} intentos | bot_id={bot_id}"
     )
 
 
@@ -192,35 +171,69 @@ async def _retry_execution_end(config: RPAConfig, run_id: str, bot_id: str) -> N
 
 async def handle_execution_start(db: Session, run_id: str, bot_id: str) -> None:
     """
-    Maneja el inicio de una ejecución RPA.
+    Maneja el inicio de una ejecución RPA (POST /rpa/execution).
 
-    Invocado por: endpoint POST /rpa/execution
-
-    - Carga config desde DB
-    - Envía mensaje de inicio a Slack via send_initial_rpa()
-
-    Args:
-        db:     Sesión de DB.
-        run_id: ID de la ejecución en Beecker (recibido del payload).
-        bot_id: id_beecker del RPA (ej. "aec.002").
+    bee_informa : solo envía mensaje de inicio.
+    bee_observa : envía mensaje de inicio + activa el job con el run_id específico.
+                  Si el job ya está activo (otra ejecución en curso), ignora la activación.
     """
     logger.info(f"🐝 [START] bot_id={bot_id} | run_id={run_id}")
 
     relation = _load_relation(db, bot_id)
     config   = _build_config(relation)
 
+    # Mensaje de inicio (igual para todos los tipos)
     monitoring = MonitoringAgent()
     await monitoring.load_config(config)
     await monitoring.send_initial_rpa(bot_id=bot_id)
-
     logger.info(f"✅ [START] Mensaje de inicio enviado | bot_id={bot_id}")
+
+    # bee_observa: activar el scheduler con el run_id específico
+    if relation.monitor_type == MonitorType.bee_observa:
+        await _activate_observa(db=db, relation=relation, run_id=str(run_id), bot_id=bot_id)
+
+
+async def _activate_observa(
+    db: Session,
+    relation: RPADashboardClient,
+    run_id: str,
+    bot_id: str,
+) -> None:
+    """Reanuda el job bee_observa e inyecta el run_id en sus kwargs."""
+    from app.services import job_service
+
+    job_id = relation.id_scheduler_job
+    if not job_id:
+        logger.warning(
+            f"⚠️ [OBSERVA] bot_id={bot_id} no tiene id_scheduler_job configurado. "
+            f"No se puede activar el monitoreo automático."
+        )
+        return
+
+    activated = job_service.activate_observa_job(db, job_id, run_id)
+
+    if activated:
+        logger.info(
+            f"🟢 [OBSERVA] Job activado | bot_id={bot_id} | run_id={run_id} | job_id={job_id}"
+        )
+    else:
+        logger.warning(
+            f"⚠️ [OBSERVA] Job ya activo (otra ejecución en curso), "
+            f"ignorando nuevo inicio | bot_id={bot_id} | run_id={run_id}"
+        )
 
 
 async def send_rpa_status(
     db: Session,
     bot_id: str,
     run_id: str | None = None,
-) -> None:
+) -> str | None:
+    """
+    Envía el status del RPA y retorna el run_state.
+
+    Returns:
+        run_state normalizado o None si no se pudo obtener.
+    """
     logger.info(f"🐝 [STATUS] bot_id={bot_id} | run_id={run_id or 'pendiente de resolver'}")
 
     relation = _load_relation(db, bot_id)
@@ -229,19 +242,57 @@ async def send_rpa_status(
     if run_id is None:
         run_id = await _resolve_latest_run_id(config=config, bot_id=bot_id)
 
-    await _dispatch_status(config=config, run_id=run_id, bot_id=bot_id)
+    return await _dispatch_status(config=config, run_id=run_id, bot_id=bot_id)
 
 
 async def handle_execution_end(db: Session, run_id: str, bot_id: str) -> None:
     """
-    Mantiene compatibilidad con el endpoint PUT /rpa/execution/{execution_id}.
+    Maneja el fin de una ejecución RPA (PUT /rpa/execution/{id}).
 
-    Delega internamente a send_rpa_status() para no duplicar lógica.
-
-    Args:
-        db:     Sesión de DB.
-        run_id: ID de la ejecución en Beecker (recibido del payload).
-        bot_id: id_beecker del RPA (ej. "aec.002").
+    bee_informa : envía status final (comportamiento original).
+    bee_observa : si el job sigue activo (endpoint llegó primero)
+                      → envía status + pausa el job.
+                  si el job ya está pausado (scheduler llegó primero)
+                      → no hace nada para evitar duplicado.
     """
     logger.info(f"🐝 [END] bot_id={bot_id} | run_id={run_id}")
-    await send_rpa_status(db=db, bot_id=bot_id, run_id=run_id)
+
+    relation = _load_relation(db, bot_id)
+
+    if relation.monitor_type == MonitorType.bee_observa:
+        await _finalize_observa(db=db, relation=relation, run_id=run_id, bot_id=bot_id)
+    else:
+        # bee_informa / bee_comunica: comportamiento original
+        await send_rpa_status(db=db, bot_id=bot_id, run_id=run_id)
+
+
+async def _finalize_observa(
+    db: Session,
+    relation: RPADashboardClient,
+    run_id: str,
+    bot_id: str,
+) -> None:
+    """Lógica de fin para bee_observa: pausa el job si el endpoint llegó primero."""
+    from app.services import job_service
+
+    job_id = relation.id_scheduler_job
+
+    # Verificar si el scheduler ya pausó el job
+    if job_id:
+        db_job = db.get(Job, job_id)
+        if db_job and db_job.status != JobStatus.active:
+            logger.info(
+                f"ℹ️ [OBSERVA] Job ya pausado (scheduler llegó primero), "
+                f"omitiendo status duplicado | bot_id={bot_id} | run_id={run_id}"
+            )
+            return
+
+    # Endpoint llegó primero → enviar status y pausar
+    config = _build_config(relation)
+    await _dispatch_status(config=config, run_id=run_id, bot_id=bot_id)
+
+    if job_id:
+        job_service.pause_observa_job(db, job_id)
+        logger.info(
+            f"⏸ [OBSERVA] Job pausado por endpoint de fin | bot_id={bot_id} | run_id={run_id}"
+        )

@@ -249,3 +249,69 @@ def get_executions(
     items = db.execute(stmt.offset((page - 1) * page_size).limit(page_size)).scalars().all()
 
     return {"total": total, "page": page, "page_size": page_size, "items": items}
+
+def activate_observa_job(db: Session, job_id: str, run_id: str) -> bool:
+    """
+    Reanuda un job bee_observa pausado e inyecta el run_id específico en sus kwargs.
+
+    Returns:
+        True  → job activado correctamente.
+        False → job ya estaba activo (otra ejecución en curso), se ignora el nuevo inicio.
+    """
+    db_job = db.get(Job, job_id)
+    if not db_job:
+        raise RuntimeError(f"Job {job_id} no encontrado en la DB")
+
+    if db_job.status == JobStatus.active:
+        return False  # Ya monitoreando, ignorar
+
+    # Inyectar run_id en kwargs
+    new_kwargs = {**db_job.job_kwargs, "run_id": run_id}
+    db_job.job_kwargs = new_kwargs
+
+    # Actualizar kwargs en APScheduler ANTES de reanudar
+    aps_job = scheduler.get_job(job_id)
+    if aps_job:
+        aps_job.modify(kwargs={
+            "job_id": job_id,
+            "task_path": db_job.task_path,
+            **new_kwargs,
+        })
+
+    # Reanudar en APScheduler
+    aps_job = scheduler.resume_job(job_id)
+    db_job.status = JobStatus.active
+    db_job.next_run_time = aps_job.next_run_time if aps_job else None
+    db.commit()
+    db.refresh(db_job)
+    logger.info(f"🟢 [OBSERVA] Job activado | job_id={job_id} | run_id={run_id}")
+    return True
+
+
+def pause_observa_job(db: Session, job_id: str) -> None:
+    """
+    Pausa un job bee_observa activo y elimina el run_id de sus kwargs.
+    Llamado cuando la ejecución monitorada alcanza un estado terminal.
+    """
+    db_job = db.get(Job, job_id)
+    if not db_job or db_job.status != JobStatus.active:
+        return
+
+    # Limpiar run_id de kwargs (vuelve al estado base: listo para el próximo inicio)
+    clean_kwargs = {k: v for k, v in db_job.job_kwargs.items() if k != "run_id"}
+    db_job.job_kwargs = clean_kwargs
+
+    # Actualizar kwargs en APScheduler antes de pausar
+    aps_job = scheduler.get_job(job_id)
+    if aps_job:
+        aps_job.modify(kwargs={
+            "job_id": job_id,
+            "task_path": db_job.task_path,
+            **clean_kwargs,
+        })
+
+    scheduler.pause_job(job_id)
+    db_job.status = JobStatus.paused
+    db_job.next_run_time = None
+    db.commit()
+    logger.info(f"⏸ [OBSERVA] Job pausado y run_id limpiado | job_id={job_id}")

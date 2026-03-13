@@ -291,7 +291,7 @@ class MonitoringAgent:
             )
             raise
 
-    async def send_status_rpa(self, run_id: int, bot_id: str) -> None:
+    async def send_status_rpa(self, run_id: int, bot_id: str) -> str:
         """
         Retrieve the current RPA execution status and send the notification to Slack.
 
@@ -338,6 +338,8 @@ class MonitoringAgent:
             run_state = (status.get("run_state") or "").lower().strip()
             if config.enable_chart and run_state not in _RPA_IN_PROGRESS_STATES:
                 await self._send_rpa_chart(status=status, config=config)
+
+            return run_state
 
         except RunNotYetAvailableError:   # ← agregar antes del except genérico
             raise

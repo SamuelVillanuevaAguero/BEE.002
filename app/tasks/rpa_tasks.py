@@ -36,46 +36,48 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def scheduled_rpa_status(job_id: str, bot_id: str) -> str:
+def scheduled_rpa_status(job_id: str, bot_id: str, run_id: str | None = None) -> str:
     """
     Task genérica para enviar el status del último run de cualquier RPA.
 
-    APScheduler la invoca como función síncrona a través de _wrapped_task.
-    Internamente corre la corrutina send_rpa_status() con asyncio.run().
-
     Args:
-        job_id: Inyectado automáticamente por _wrapped_task (no usar directamente).
-        bot_id: id_beecker del RPA. Viene de job_kwargs al crear el job.
-                Ejemplo: "aec.002", "ain.005"
-
-    Returns:
-        Mensaje de resultado (queda registrado en JobExecution.output).
-
-    Raises:
-        RuntimeError: Si no hay configuración en DB para el bot_id.
-        RuntimeError: Si no hay runs recientes para el bot en Beecker.
-        BeeckerAPIError: Si falla la conexión con Beecker.
+        job_id:  Inyectado automáticamente por _wrapped_task.
+        bot_id:  id_rpa del RPA en rpa_dashboard_client.
+        run_id:  Inyectado por activate_observa_job() cuando el tipo es bee_observa.
+                 None para bee_informa/bee_comunica → resuelve el último run automáticamente.
     """
     from app.db.session import SessionLocal
     from app.services.rpa_orchestration_service import send_rpa_status
+    from app.services import job_service
 
-    logger.info(f"⏰ [SCHEDULER] Iniciando status | bot_id={bot_id} | job_id={job_id}")
+    logger.info(
+        f"⏰ [SCHEDULER] Iniciando status | bot_id={bot_id} | "
+        f"run_id={run_id or 'auto'} | job_id={job_id}"
+    )
 
     db = SessionLocal()
     try:
-        asyncio.run(
-            send_rpa_status(
-                db=db,
-                bot_id=bot_id,
-                run_id=None,  # None → el servicio resuelve el último run automáticamente
-            )
+        run_state = asyncio.run(
+            send_rpa_status(db=db, bot_id=bot_id, run_id=run_id)
         )
+
+        # bee_observa: si la ejecución específica terminó → pausar el job
+        if run_id and run_state in ("completed", "failed"):
+            job_service.pause_observa_job(db, job_id)
+            logger.info(
+                f"⏸ [OBSERVA] Ejecución terminada (run_state='{run_state}'), "
+                f"job pausado | bot_id={bot_id} | run_id={run_id}"
+            )
+
         result = f"Status enviado correctamente para bot_id={bot_id}"
         logger.info(f"✅ [SCHEDULER] {result} | job_id={job_id}")
         return result
 
     except Exception as e:
-        logger.error(f"❌ [SCHEDULER] Error al enviar status | bot_id={bot_id} | job_id={job_id} | {e}")
+        logger.error(
+            f"❌ [SCHEDULER] Error al enviar status | bot_id={bot_id} | "
+            f"job_id={job_id} | {e}"
+        )
         raise
 
     finally:
