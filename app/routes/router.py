@@ -4,6 +4,8 @@ from app.routes import hello
 from app.routes.monitoring import rpa, agent
 from app.routes.jobs import jobs, executions
 from app.routes import automations
+from app.routes import rpa_dashboard
+
 
 router = APIRouter()
 
@@ -20,6 +22,9 @@ router.include_router(executions.router)
 
 #automations
 router.include_router(automations.router)
+
+router.include_router(rpa_dashboard.router)
+
 
 #health
 @router.get("/health", tags=["Health"])

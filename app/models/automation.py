@@ -1,3 +1,12 @@
+"""
+app/models/automation.py
+=========================
+Modelos SQLAlchemy para el dominio de automatización RPA.
+
+MonitorType acepta tanto guión bajo (bee_informa) como guión medio (bee-informa).
+El valor persistido en BD siempre usa guión bajo.
+"""
+
 import enum
 
 from sqlalchemy import (
@@ -23,9 +32,26 @@ class PlatformType(str, enum.Enum):
 
 
 class MonitorType(str, enum.Enum):
-    bee_observa = "bee-observa"
-    bee_informa = "bee-informa"
-    bee_comunica = "bee-comunica"
+    bee_observa  = "bee_observa"
+    bee_informa  = "bee_informa"
+    bee_comunica = "bee_comunica"
+
+    @classmethod
+    def _missing_(cls, value):
+        """
+        Permite recibir tanto guión medio como guión bajo.
+
+        Ejemplos aceptados:
+            "bee-informa"  → MonitorType.bee_informa
+            "bee_informa"  → MonitorType.bee_informa
+            "bee-observa"  → MonitorType.bee_observa
+        """
+        if isinstance(value, str):
+            normalized = value.replace("-", "_")
+            for member in cls:
+                if member.value == normalized:
+                    return member
+        return None
 
 
 # ---------------------------------------------------------
