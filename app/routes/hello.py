@@ -11,6 +11,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/rpa", tags=["RPA"])
 
 
+# routes/debug.py (solo para pruebas)
+@router.get("/debug/session")
+async def session_status():
+    from app.utils.session_manager import beecker_session
+    s = beecker_session
+    s._init_state()
+    return {
+        "has_token":   s._access_token is not None,
+        "expires_at":  s._expires_at.isoformat() if s._expires_at else None,
+        "is_valid":    s._is_valid(),
+        "minutes_left": int(
+            (s._expires_at - __import__('datetime').datetime.now(
+                tz=__import__('datetime').timezone.utc
+            )).total_seconds() / 60
+        ) if s._expires_at else None,
+    }
+
 @router.post(
     "/test",
     response_model=ExecutionResponse,

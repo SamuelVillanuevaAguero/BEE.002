@@ -161,47 +161,28 @@ class MonitoringAgent:
             SlackErrorAuthenticate: If the Slack token is invalid.
             BeeckerAPIError: If Beecker authentication fails.
         """
-        try:
-            config.validate()
-            self.__rpa_config = config
+        
+        from app.utils.session_manager import beecker_session, slack_session, freshdesk_session
 
-            await self._login_slack(config.token_slack)
+        config.validate()
+        self.__rpa_config = config
 
-            if config.mention_emails:
-                self._mention_ids = await self._resolve_mention_ids(
-                    config.mention_emails, context="RPA"
-                )
+        # Slack — singleton, solo autentica la primera vez
+        self.__api_slack = await slack_session.get_api(config.token_slack)
+        if config.mention_emails:
+            self._mention_ids = await self._resolve_mention_ids(config.mention_emails, "RPA")
 
-            await self._login_beecker(
-                email=config.email_dash,
-                password=config.password_dash,
-                platform=config.platform,
-                target="_rpa",
+        # Beecker — singleton con auto-refresh
+        api = BeeckerAPI(platform=config.platform)
+        await api.login(config.email_dash, config.password_dash)  # usa el singleton internamente
+        self.__api_beecker = api
+
+        # FreshDesk — singleton
+        if config.username_freshdesk and config.password_freshdesk:
+            self.__api_freshdesk = await freshdesk_session.get_api(
+                config.username_freshdesk, config.password_freshdesk
             )
-
-            if config.username_freshdesk and config.password_freshdesk:
-                await self._login_fresh(
-                    username=config.username_freshdesk,
-                    password=config.password_freshdesk,
-                )
-                if config.enable_freshdesk_link and config.freshdesk_client_name:
-                    self._freshdesk_url = await self._resolve_freshdesk_url(
-                        client_name=config.freshdesk_client_name,
-                        status_id=config.freshdesk_status_id,
-                    )
-
-        except SlackErrorAuthenticate:
-            logger.error("Fallo de autenticación en Slack. No es posible reportar al canal de errores.")
-            raise
-
-        except Exception as e:
-            await self._send_error_to_slack(
-                issue=str(e),
-                context="load_config",
-                traceback_str=tb.format_exc(),
-            )
-            raise
-
+ 
     async def load_agent_config(self, config: AgentConfig) -> None:
         """
         Load the Agent configuration and authenticate all required platforms.

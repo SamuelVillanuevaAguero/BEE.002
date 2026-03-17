@@ -51,20 +51,17 @@ class CloudPlatform(BasePlatform):
     # ------------------------------------------------------------------
     # Autenticación
     # ------------------------------------------------------------------
-
     async def login(self, email: str, password: str) -> Dict[str, Any]:
         """
-        Authenticate against the Cloud platform.
+        Authenticate against the Cloud platform via the singleton session manager.
 
-        The returned token is valid for both RPA endpoints (dashboard)
-        and Agents endpoints (api).
+        On the first call, performs a full login and stores the token.
+        On subsequent calls, returns the existing token if still valid,
+        or refreshes it automatically if it's about to expire.
 
         Args:
-            email:
-                Email registered in cloud.beecker.ai.
-
-            password:
-                User password.
+            email:    Email registered in cloud.beecker.ai.
+            password: User password.
 
         Returns
         -------
@@ -84,20 +81,26 @@ class CloudPlatform(BasePlatform):
         PlatformAPIError
             Unexpected API error.
         """
-        endpoint = f"{self.BASE_URL}/auth/login/"
-        payload  = {"email": email, "password": password}
+        from app.utils.session_manager import beecker_session
 
-        data = await self._post(endpoint, payload)
+        # Guardar credenciales para poder re-autenticar en _post() si hay un 401
+        self._email    = email
+        self._password = password
 
-        self._access_token  = data.get("access")
-        self._refresh_token = data.get("refresh")
-        self._http.set_header("Authorization", f"Bearer {self._access_token}")
+        token = await beecker_session.get_token(
+            email=email,
+            password=password,
+            http_client=self._http,
+        )
+
+        self._access_token  = token
+        self._refresh_token = beecker_session._refresh_token
+        self._http.set_header("Authorization", f"Bearer {token}")
 
         return {
             "access_token":  self._access_token,
             "refresh_token": self._refresh_token,
         }
-
 
     async def get_run_history(
         self,

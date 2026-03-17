@@ -97,8 +97,10 @@ class BasePlatform(ABC):
     BASE_URL: str = ""  # Subclase define su URL base (RPA)
 
     def __init__(self):
-        self._access_token: Optional[str] = None
+        self._access_token:  Optional[str] = None
         self._refresh_token: Optional[str] = None
+        self._email:         Optional[str] = None   # ← nuevo
+        self._password:      Optional[str] = None   # ← nuevo
         self._http = HttpClient()
 
     # ------------------------------------------------------------------
@@ -334,10 +336,15 @@ class BasePlatform(ABC):
     endpoint: str,
     payload: Dict,
     params: Optional[Dict] = None,
-    retries: int = 2,
 ) -> Any:
         """
         Perform an asynchronous POST request and handle common HTTP errors.
+
+        Before each request, checks whether the Beecker token is still valid
+        via the singleton session manager and refreshes it proactively if needed.
+
+        On an unexpected 401, invalidates the singleton session and retries
+        the request exactly once with a fresh token.
 
         Note:
             The return type is `Any` because some agent endpoints return a list
@@ -353,10 +360,6 @@ class BasePlatform(ABC):
             params:
                 Optional query parameters.
 
-            retries:
-                Number of retry attempts on connection errors (status_code = 0).
-                Uses exponential backoff (1s, 2s, …). Default: 2.
-
         Returns
         -------
         JSON response (dict or list depending on the endpoint).
@@ -367,16 +370,42 @@ class BasePlatform(ABC):
             HTTP 404.
 
         PlatformAuthError
-            HTTP 401/403.
+            HTTP 401/403 after retry exhausted.
 
         PlatformConnectionError
-            Connection failure (status_code = 0) after all retries exhausted.
+            Connection failure (status_code = 0) after HttpClient retries.
 
         PlatformAPIError
             Any other HTTP error.
         """
+        # ── Refrescar token proactivamente si está por expirar ────────────────
+        if self._email and self._access_token:
+            from app.utils.session_manager import beecker_session
+            fresh_token = await beecker_session.get_token(
+                email=self._email,
+                password=self._password,
+                http_client=self._http,
+            )
+            if fresh_token != self._access_token:
+                self._access_token = fresh_token
+                self._http.set_header("Authorization", f"Bearer {fresh_token}")
+
         result = await self._http.post(endpoint, json=payload, params=params or {})
 
+        # ── 401 inesperado: invalidar singleton y reintentar una vez ──────────
+        if result.get("status_code") == 401 and self._email:
+            from app.utils.session_manager import beecker_session
+            beecker_session.force_invalidate()
+            fresh_token = await beecker_session.get_token(
+                email=self._email,
+                password=self._password,
+                http_client=self._http,
+            )
+            self._access_token = fresh_token
+            self._http.set_header("Authorization", f"Bearer {fresh_token}")
+            result = await self._http.post(endpoint, json=payload, params=params or {})
+
+        # ── Manejo de errores ─────────────────────────────────────────────────
         if result["success"]:
             return result["data"]
 
@@ -398,7 +427,7 @@ class BasePlatform(ABC):
         raise PlatformAPIError(
             f"[{self.__class__.__name__}] Error {status} en petición a {endpoint}: {error}"
         )
-    
+
     async def _get(
         self,
         endpoint: str,
