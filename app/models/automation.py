@@ -1,12 +1,3 @@
-"""
-app/models/automation.py
-=========================
-Modelos SQLAlchemy para el dominio de automatización RPA.
-
-MonitorType acepta tanto guión bajo (bee_informa) como guión medio (bee-informa).
-El valor persistido en BD siempre usa guión bajo.
-"""
-
 import enum
 
 from sqlalchemy import (
@@ -32,26 +23,9 @@ class PlatformType(str, enum.Enum):
 
 
 class MonitorType(str, enum.Enum):
-    bee_observa  = "bee_observa"
-    bee_informa  = "bee_informa"
-    bee_comunica = "bee_comunica"
-
-    @classmethod
-    def _missing_(cls, value):
-        """
-        Permite recibir tanto guión medio como guión bajo.
-
-        Ejemplos aceptados:
-            "bee-informa"  → MonitorType.bee_informa
-            "bee_informa"  → MonitorType.bee_informa
-            "bee-observa"  → MonitorType.bee_observa
-        """
-        if isinstance(value, str):
-            normalized = value.replace("-", "_")
-            for member in cls:
-                if member.value == normalized:
-                    return member
-        return None
+    bee_observa = "bee-observa"
+    bee_informa = "bee-informa"
+    bee_comunica = "bee-comunica"
 
 
 # ---------------------------------------------------------
@@ -60,12 +34,11 @@ class MonitorType(str, enum.Enum):
 class Client(Base):
     __tablename__ = "client"
 
-    id_client: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
     client_name: Mapped[str] = mapped_column(String(150), nullable=False)
 
-    rpa_dashboards: Mapped[list["RPADashboardClient"]] = relationship(back_populates="client")
-    rpa_uipaths: Mapped[list["RPAUiPathClient"]] = relationship(back_populates="client")
-    agents: Mapped[list["AgentClient"]] = relationship(back_populates="client")
+    rpa_dashboard: Mapped[list["rpa_dashboard_monitoring"]] = relationship(back_populates="client")
+    rpa_uipath: Mapped[list["RPAUiPathClient"]] = relationship(back_populates="client")
 
 
 # ---------------------------------------------------------
@@ -74,43 +47,51 @@ class Client(Base):
 class RPADashboard(Base):
     __tablename__ = "rpa_dashboard"
 
-    id_rpa: Mapped[str] = mapped_column(String(100), primary_key=True)
+    id_beecker: Mapped[str] = mapped_column(String(10), nullable=False, primary_key=True)
+    
+    id_dashboard: Mapped[str] = mapped_column(String(40), nullable=False)
 
-    id_beecker: Mapped[str] = mapped_column(String(100))
-    process_name: Mapped[str] = mapped_column(String(200))
+    process_name: Mapped[str] = mapped_column(String(200), nullable=False)
 
-    platform: Mapped[PlatformType] = mapped_column(Enum(PlatformType))
+    platform: Mapped[PlatformType] = mapped_column(Enum(PlatformType), nullable=False)
 
-    clients: Mapped[list["RPADashboardClient"]] = relationship(back_populates="rpa")
+    id_client: Mapped[str] = mapped_column(
+        ForeignKey("client.id"),
+        nullable=False
+    )
+
+    scheduled_monitoring: Mapped[list["RPADashboardMonitoring"]] = relationship(
+        back_populates="rpa", 
+        cascade="all, delete"
+    )
 
     business_errors: Mapped[list["RPADashboardBusinessError"]] = relationship(
         back_populates="rpa",
         cascade="all, delete"
     )
 
+    client: Mapped["Client"] = relationship(back_populates="rpa_dashboard")
+
 
 # ---------------------------------------------------------
-# RPA DASHBOARD CLIENT
+# RPA DASHBOARD MONITORING
 # ---------------------------------------------------------
-class RPADashboardClient(Base):
-    __tablename__ = "rpa_dashboard_client"
+class RPADashboardMonitoring(Base):
+    __tablename__ = "rpa_dashboard_monitoring"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, nullable=False)
 
     id_rpa: Mapped[str] = mapped_column(
-        ForeignKey("rpa_dashboard.id_rpa"),
-        primary_key=True
-    )
-
-    id_client: Mapped[int] = mapped_column(
-        ForeignKey("client.id_client"),
-        primary_key=True
+        ForeignKey("rpa_dashboard.id_beecker"),
+        nullable=False
     )
 
     monitor_type: Mapped[MonitorType] = mapped_column(Enum(MonitorType), nullable=False)
 
     transaction_unit: Mapped[str] = mapped_column(String(100))
-    slack_channel: Mapped[str | None] = mapped_column(String(100))
+    slack_channel: Mapped[str | None] = mapped_column(String(100), nullable=False)
 
-    manage_flags: Mapped[dict | None] = mapped_column(JSON)
+    manage_flags: Mapped[dict | None] = mapped_column(JSON, nullable=False)
     roc_agents: Mapped[list | None] = mapped_column(JSON)
 
     id_scheduler_job: Mapped[str | None] = mapped_column(
@@ -118,9 +99,8 @@ class RPADashboardClient(Base):
         nullable=True
     )
 
-    rpa: Mapped["RPADashboard"] = relationship(back_populates="clients")
-    client: Mapped["Client"] = relationship(back_populates="rpa_dashboards")
-    job: Mapped["Job"] = relationship()
+    rpa: Mapped["RPADashboard"] = relationship(back_populates="scheduled_monitoring")
+    job: Mapped["Job"] = relationship(back_populates="rpa_dashboard")
 
 
 # ---------------------------------------------------------
@@ -129,10 +109,10 @@ class RPADashboardClient(Base):
 class RPADashboardBusinessError(Base):
     __tablename__ = "rpa_dashboard_business_error"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
 
-    id_rpa: Mapped[str] = mapped_column(
-        ForeignKey("rpa_dashboard.id_rpa"),
+    id_platform: Mapped[str] = mapped_column(
+        ForeignKey("rpa_dashboard.id_beecker"),
         nullable=False
     )
 
@@ -141,148 +121,3 @@ class RPADashboardBusinessError(Base):
     rpa: Mapped["RPADashboard"] = relationship(back_populates="business_errors")
 
 
-# ---------------------------------------------------------
-# RPA UIPATH
-# ---------------------------------------------------------
-class RPAUiPath(Base):
-    __tablename__ = "rpa_uipath"
-
-    id_rpa: Mapped[str] = mapped_column(String(100), primary_key=True)
-
-    id_beecker: Mapped[str] = mapped_column(String(100))
-
-    framework: Mapped[str] = mapped_column(String(100))
-    robot_name: Mapped[str] = mapped_column(String(200))
-    process_name: Mapped[str] = mapped_column(String(200))
-
-    clients: Mapped[list["RPAUiPathClient"]] = relationship(back_populates="rpa")
-
-    business_errors: Mapped[list["RPAUiPathBusinessError"]] = relationship(
-        back_populates="rpa",
-        cascade="all, delete"
-    )
-
-
-# ---------------------------------------------------------
-# RPA UIPATH CLIENT
-# ---------------------------------------------------------
-class RPAUiPathClient(Base):
-    __tablename__ = "rpa_uipath_client"
-
-    id_rpa: Mapped[str] = mapped_column(
-        ForeignKey("rpa_uipath.id_rpa"),
-        primary_key=True
-    )
-
-    id_client: Mapped[int] = mapped_column(
-        ForeignKey("client.id_client"),
-        primary_key=True
-    )
-
-    monitor_type: Mapped[MonitorType] = mapped_column(Enum(MonitorType), nullable=False)
-
-    transaction_unit: Mapped[str] = mapped_column(String(100))
-    slack_channel: Mapped[str | None] = mapped_column(String(100))
-
-    manage_flags: Mapped[dict | None] = mapped_column(JSON)
-    roc_agents: Mapped[list | None] = mapped_column(JSON)
-
-    id_scheduler_job: Mapped[str | None] = mapped_column(
-        ForeignKey("jobs.id"),
-        nullable=True
-    )
-
-    rpa: Mapped["RPAUiPath"] = relationship(back_populates="clients")
-    client: Mapped["Client"] = relationship(back_populates="rpa_uipaths")
-    job: Mapped["Job"] = relationship()
-
-
-# ---------------------------------------------------------
-# RPA UIPATH BUSINESS ERROR
-# ---------------------------------------------------------
-class RPAUiPathBusinessError(Base):
-    __tablename__ = "rpa_uipath_business_error"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-
-    id_rpa: Mapped[str] = mapped_column(
-        ForeignKey("rpa_uipath.id_rpa"),
-        nullable=False
-    )
-
-    error_message: Mapped[str] = mapped_column(String(500))
-
-    rpa: Mapped["RPAUiPath"] = relationship(back_populates="business_errors")
-
-
-# ---------------------------------------------------------
-# AGENT
-# ---------------------------------------------------------
-class Agent(Base):
-    __tablename__ = "agent"
-
-    id_agent: Mapped[str] = mapped_column(String(100), primary_key=True)
-
-    id_beecker: Mapped[str] = mapped_column(String(100))
-    process_name: Mapped[str] = mapped_column(String(200))
-
-    platform: Mapped[PlatformType] = mapped_column(Enum(PlatformType))
-
-    clients: Mapped[list["AgentClient"]] = relationship(back_populates="agent")
-
-    state_errors: Mapped[list["AgentStateError"]] = relationship(
-        back_populates="agent",
-        cascade="all, delete"
-    )
-
-
-# ---------------------------------------------------------
-# AGENT CLIENT
-# ---------------------------------------------------------
-class AgentClient(Base):
-    __tablename__ = "agent_client"
-
-    id_agent: Mapped[str] = mapped_column(
-        ForeignKey("agent.id_agent"),
-        primary_key=True
-    )
-
-    id_client: Mapped[int] = mapped_column(
-        ForeignKey("client.id_client"),
-        primary_key=True
-    )
-
-    monitor_type: Mapped[MonitorType] = mapped_column(Enum(MonitorType), nullable=False)
-
-    transaction_unit: Mapped[str] = mapped_column(String(100))
-    slack_channel: Mapped[str | None] = mapped_column(String(100))
-
-    manage_flags: Mapped[dict | None] = mapped_column(JSON)
-    roc_agents: Mapped[list | None] = mapped_column(JSON)
-
-    id_scheduler_job: Mapped[str | None] = mapped_column(
-        ForeignKey("jobs.id"),
-        nullable=True
-    )
-
-    agent: Mapped["Agent"] = relationship(back_populates="clients")
-    client: Mapped["Client"] = relationship(back_populates="agents")
-    job: Mapped["Job"] = relationship()
-
-
-# ---------------------------------------------------------
-# AGENT STATE ERROR
-# ---------------------------------------------------------
-class AgentStateError(Base):
-    __tablename__ = "agent_state_error"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-
-    id_agent: Mapped[str] = mapped_column(
-        ForeignKey("agent.id_agent"),
-        nullable=False
-    )
-
-    state_name: Mapped[str] = mapped_column(String(100))
-
-    agent: Mapped["Agent"] = relationship(back_populates="state_errors")
