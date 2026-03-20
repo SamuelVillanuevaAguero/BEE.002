@@ -1,17 +1,11 @@
+import uuid
+
 from app.models.automation import (
     Client,
-
     RPADashboard,
-    RPADashboardClient,
-    RPADashboardBusinessError,
-
+    RPADashboardMonitoring,
     RPAUiPath,
-    RPAUiPathClient,
-    RPAUiPathBusinessError,
-
-    Agent,
-    AgentClient,
-    AgentStateError
+    RPAUiPathMonitoring,
 )
 
 
@@ -33,12 +27,19 @@ def create_client(db, client_name: str):
 # RPA DASHBOARD
 # ---------------------------------------------------------
 def create_rpa_dashboard(db, payload):
-
+    """
+    Crea el registro base en rpa_dashboard.
+    PK = id_beecker (ej: "AEC.001").
+    id_dashboard = ID numérico para la API de Beecker (ej: "104").
+    business_errors = lista JSON opcional (ej: ["Business Exception"]).
+    """
     rpa = RPADashboard(
-        id_rpa=payload.id_rpa,
         id_beecker=payload.id_beecker,
+        id_dashboard=payload.id_dashboard,
         process_name=payload.process_name,
-        platform=payload.platform
+        platform=payload.platform,
+        id_client=payload.id_client,
+        business_errors=payload.business_errors or None,
     )
 
     db.add(rpa)
@@ -49,13 +50,16 @@ def create_rpa_dashboard(db, payload):
 
 
 # ---------------------------------------------------------
-# RPA DASHBOARD CLIENT CONFIG
+# RPA DASHBOARD MONITORING CONFIG
 # ---------------------------------------------------------
-def link_rpa_dashboard_client(db, payload):
-
-    relation = RPADashboardClient(
-        id_rpa=payload.id_rpa,
-        id_client=payload.id_client,
+def link_rpa_dashboard_monitoring(db, payload):
+    """
+    Crea el registro de configuración en rpa_dashboard_monitoring.
+    id_beecker → rpa_dashboard.id_beecker (ej: "AEC.001")
+    """
+    relation = RPADashboardMonitoring(
+        id=str(uuid.uuid4()),
+        id_beecker=payload.id_beecker,
         monitor_type=payload.monitor_type,
         transaction_unit=payload.transaction_unit,
         slack_channel=payload.slack_channel,
@@ -68,22 +72,6 @@ def link_rpa_dashboard_client(db, payload):
     db.commit()
 
     return relation
-
-
-# ---------------------------------------------------------
-# RPA DASHBOARD BUSINESS ERROR
-# ---------------------------------------------------------
-def add_rpa_dashboard_business_error(db, id_rpa: str, error_message: str):
-
-    error = RPADashboardBusinessError(
-        id_rpa=id_rpa,
-        error_message=error_message
-    )
-
-    db.add(error)
-    db.commit()
-
-    return error
 
 
 # ---------------------------------------------------------
@@ -92,11 +80,12 @@ def add_rpa_dashboard_business_error(db, id_rpa: str, error_message: str):
 def create_rpa_uipath(db, payload):
 
     rpa = RPAUiPath(
-        id_rpa=payload.id_rpa,
+        uipath_robot_name=payload.uipath_robot_name,
         id_beecker=payload.id_beecker,
+        beecker_name=payload.beecker_name,
         framework=payload.framework,
-        robot_name=payload.robot_name,
-        process_name=payload.process_name
+        id_client=payload.id_client,
+        business_errors=payload.business_errors or None,
     )
 
     db.add(rpa)
@@ -107,13 +96,13 @@ def create_rpa_uipath(db, payload):
 
 
 # ---------------------------------------------------------
-# RPA UIPATH CLIENT CONFIG
+# RPA UIPATH MONITORING CONFIG
 # ---------------------------------------------------------
-def link_rpa_uipath_client(db, payload):
+def link_rpa_uipath_monitoring(db, payload):
 
-    relation = RPAUiPathClient(
-        id_rpa=payload.id_rpa,
-        id_client=payload.id_client,
+    relation = RPAUiPathMonitoring(
+        id=str(uuid.uuid4()),
+        uipath_robot_name=payload.uipath_robot_name,
         monitor_type=payload.monitor_type,
         transaction_unit=payload.transaction_unit,
         slack_channel=payload.slack_channel,
@@ -126,76 +115,3 @@ def link_rpa_uipath_client(db, payload):
     db.commit()
 
     return relation
-
-
-# ---------------------------------------------------------
-# RPA UIPATH BUSINESS ERROR
-# ---------------------------------------------------------
-def add_rpa_uipath_business_error(db, id_rpa: str, error_message: str):
-
-    error = RPAUiPathBusinessError(
-        id_rpa=id_rpa,
-        error_message=error_message
-    )
-
-    db.add(error)
-    db.commit()
-
-    return error
-
-
-# ---------------------------------------------------------
-# AGENT
-# ---------------------------------------------------------
-def create_agent(db, payload):
-
-    agent = Agent(
-        id_agent=payload.id_agent,
-        id_beecker=payload.id_beecker,
-        process_name=payload.process_name,
-        platform=payload.platform
-    )
-
-    db.add(agent)
-    db.commit()
-    db.refresh(agent)
-
-    return agent
-
-
-# ---------------------------------------------------------
-# AGENT CLIENT CONFIG
-# ---------------------------------------------------------
-def link_agent_client(db, payload):
-
-    relation = AgentClient(
-        id_agent=payload.id_agent,
-        id_client=payload.id_client,
-        monitor_type=payload.monitor_type,
-        transaction_unit=payload.transaction_unit,
-        slack_channel=payload.slack_channel,
-        manage_flags=payload.manage_flags,
-        roc_agents=payload.roc_agents,
-        id_scheduler_job=payload.id_scheduler_job,
-    )
-
-    db.add(relation)
-    db.commit()
-
-    return relation
-
-
-# ---------------------------------------------------------
-# AGENT STATE ERROR
-# ---------------------------------------------------------
-def add_agent_state_error(db, id_agent: str, state_name: str):
-
-    error = AgentStateError(
-        id_agent=id_agent,
-        state_name=state_name
-    )
-
-    db.add(error)
-    db.commit()
-
-    return error

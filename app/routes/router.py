@@ -1,32 +1,37 @@
+"""
+app/routes/router.py
+"""
 from fastapi import APIRouter
 
 from app.routes import hello
 from app.routes.monitoring import rpa, agent
 from app.routes.jobs import jobs, executions
 from app.routes import automations
-from app.routes import rpa_dashboard
-
+from app.routes import clients
+from app.routes.rpa_dashboard import dashboard_router, uipath_router
 
 router = APIRouter()
 
-#home
+# home / debug
 router.include_router(hello.router)
 
-#monitoring
+# monitoring webhooks
 router.include_router(rpa.router)
 router.include_router(agent.router)
 
-#jobs
+# jobs
 router.include_router(jobs.router)
 router.include_router(executions.router)
 
-#automations
+# automations (legacy)
 router.include_router(automations.router)
 
-router.include_router(rpa_dashboard.router)
+# CRUD
+router.include_router(clients.router)
+router.include_router(dashboard_router)
+router.include_router(uipath_router)
 
 
-#health
 @router.get("/health", tags=["Health"])
 def health():
     from app.core.scheduler import scheduler

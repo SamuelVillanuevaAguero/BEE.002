@@ -66,8 +66,12 @@ class Job(Base):
 
     rpa_dashboard: Mapped[list["RPADashboardMonitoring"]] = relationship(
         "RPADashboardMonitoring",
-        back_populates="job",
-        cascade="all, delete-orphan"
+        back_populates="job"
+    )
+
+    rpa_uipath: Mapped[list["RPAUiPathMonitoring"]] = relationship(
+        "RPAUiPathMonitoring",
+        back_populates="job"
     )
 
     executions: Mapped[list["JobExecution"]] = relationship(

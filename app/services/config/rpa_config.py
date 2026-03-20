@@ -2,24 +2,16 @@
 rpa_config.py
 =============
 Configuration object used by the monitoring agent to define the behavior
-of a monitored RPA process or agent.
+of a monitored RPA process.
 
 Each bot/process has its own RPAConfig instance. Fields can be overridden
 either by subclassing the configuration or by instantiating it with the
 desired values.
 
-Example::
-
-    config = RPAConfig(
-        bot_name="AIN.002",
-        process_name="Order entry - Performer",
-        transaction_unit="files",
-        transaction_unit_singular="file",
-        freshdesk_client_name="Acme Corp",
-        mention_emails=["samuel.villanueva@beecker.ai", "alan.vega@beecker.ai"],
-        enable_overtime_check=True,
-        enable_freshdesk_link=True,
-    )
+New field — id_dashboard:
+    ID numérico de plataforma (ej: "114") usado para hacer peticiones a la API
+    de Beecker. Se diferencia de bot_name (id_beecker = "AEC.001") que es el
+    identificador visible para el equipo ROC y en los mensajes de Slack.
 """
 
 from __future__ import annotations
@@ -36,23 +28,25 @@ load_dotenv()
 @dataclass
 class RPAConfig:
     """
-    Configuration container for a monitorable process (RPA or Agent).
+    Configuration container for a monitorable RPA process.
 
     Attributes
     ----------
     bot_name:
-        Short identifier of the bot (e.g. "AIN.002"). Displayed in uppercase
-        in Slack messages.
+        Short ROC identifier of the bot (e.g. "AEC.001"). Displayed in Slack messages.
+
+    id_dashboard:
+        Numeric platform ID used for Beecker API calls (e.g. "114").
+        This is rpa_dashboard.id_dashboard — NOT the same as bot_name.
 
     process_name:
-        Human-readable name of the monitored process
-        (e.g. "Order entry - Performer").
+        Human-readable name of the monitored process.
 
     transaction_unit:
-        Transaction unit in plural form (e.g. "files", "records").
+        Transaction unit in plural form (e.g. "facturas", "archivos").
 
     transaction_unit_singular:
-        Transaction unit in singular form (e.g. "file", "record").
+        Transaction unit in singular form (e.g. "factura", "archivo").
 
     show_error_groups:
         If True, include grouped error details in Slack messages.
@@ -62,32 +56,26 @@ class RPAConfig:
 
     mention_emails:
         List of email addresses to mention in critical failure alerts.
-        The MonitoringAgent resolves them to Slack user IDs when loading
-        the configuration.
 
     channel_name:
         Slack channel where notifications will be sent.
 
     freshdesk_client_name:
-        Client name in FreshDesk (exactly as registered in the platform).
-        Used to build the FreshDesk ticket link. If None and
-        enable_freshdesk_link is True, the link will not be included.
+        Client name in FreshDesk. Used to build the FreshDesk ticket link.
+        If None and enable_freshdesk_link is True, the link will not be included.
 
     freshdesk_status_id:
         Ticket status ID used when filtering FreshDesk tickets (default: 0).
 
     enable_overtime_check:
-        Enables detection of executions exceeding the historical average
-        runtime, which may trigger the OVERTIME scenario.
+        Enables detection of executions exceeding the historical average runtime.
 
     enable_freshdesk_link:
         If True, include a FreshDesk ticket link in messages when failed
         transactions exist.
 
     enable_chart:
-        If True (default), generate and send a PNG chart as an image attachment
-        in Slack when send_status_rpa() finishes (run_state != in_progress/pending).
-        Disable if the channel does not support files or charts are not desired.
+        If True, generate and send a PNG chart as an image attachment in Slack.
 
     email_dash:
         Authentication email used to access the Beecker Dashboard.
@@ -108,8 +96,9 @@ class RPAConfig:
         FreshDesk API password (read from PASSWORD_FRESHDESK).
     """
 
-        # ── Process identification ──────────────────────────────────────────────────
-    bot_name: str = ""
+    # ── Process identification ──────────────────────────────────────────────────
+    bot_name: str = ""          # id_beecker visible en Slack  (ej: "AEC.001")
+    id_dashboard: str = ""      # id numérico para la API Beecker (ej: "114")
     process_name: str = ""
 
     # ── Transaction units ───────────────────────────────────────────────────────
@@ -129,7 +118,7 @@ class RPAConfig:
     channel_name: str = "#agente-monitor-test"
 
     # ── FreshDesk ───────────────────────────────────────────────────────────────
-    freshdesk_client_name: Optional[str] = 'Aeroméxico'
+    freshdesk_client_name: Optional[str] = None
     freshdesk_status_id: int = 0
 
     # ── Feature flags ───────────────────────────────────────────────────────────
@@ -164,6 +153,8 @@ class RPAConfig:
 
         if not self.bot_name:
             errors.append("bot_name no puede estar vacío.")
+        if not self.id_dashboard:
+            errors.append("id_dashboard no puede estar vacío.")
         if not self.process_name:
             errors.append("process_name no puede estar vacío.")
         if not self.email_dash:

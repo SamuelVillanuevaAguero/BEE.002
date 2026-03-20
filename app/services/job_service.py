@@ -250,25 +250,35 @@ def get_executions(
 
     return {"total": total, "page": page, "page_size": page_size, "items": items}
 
-def activate_observa_job(db: Session, job_id: str, run_id: str) -> bool:
+def activate_observa_job(db, job_id: str, run_id: str, monitoring_id: str | None = None) -> bool:
     """
-    Reanuda un job bee_observa pausado e inyecta el run_id específico en sus kwargs.
-
+    Reanuda un job bee_observa pausado e inyecta run_id y monitoring_id en sus kwargs.
+ 
+    monitoring_id identifica el registro exacto de rpa_dashboard_monitoring,
+    permitiendo que el scheduler ejecute la configuración correcta (canal, agentes, etc.)
+    cuando hay múltiples monitoreos para el mismo bot.
+ 
     Returns:
         True  → job activado correctamente.
-        False → job ya estaba activo (otra ejecución en curso), se ignora el nuevo inicio.
+        False → job ya estaba activo (otra ejecución en curso), se ignora.
     """
+    from app.core.scheduler import scheduler
+    from app.models.job import JobStatus
+ 
     db_job = db.get(Job, job_id)
     if not db_job:
-        raise RuntimeError(f"Job {job_id} no encontrado en la DB")
-
+        raise RuntimeError(f"Job {job_id} no encontrado en la BD")
+ 
     if db_job.status == JobStatus.active:
         return False  # Ya monitoreando, ignorar
-
-    # Inyectar run_id en kwargs
+ 
+    # Inyectar run_id y monitoring_id en kwargs
     new_kwargs = {**db_job.job_kwargs, "run_id": run_id}
+    if monitoring_id:
+        new_kwargs["monitoring_id"] = monitoring_id
+ 
     db_job.job_kwargs = new_kwargs
-
+ 
     # Actualizar kwargs en APScheduler ANTES de reanudar
     aps_job = scheduler.get_job(job_id)
     if aps_job:
@@ -277,17 +287,18 @@ def activate_observa_job(db: Session, job_id: str, run_id: str) -> bool:
             "task_path": db_job.task_path,
             **new_kwargs,
         })
-
+ 
     # Reanudar en APScheduler
     aps_job = scheduler.resume_job(job_id)
     db_job.status = JobStatus.active
     db_job.next_run_time = aps_job.next_run_time if aps_job else None
     db.commit()
     db.refresh(db_job)
-    logger.info(f"🟢 [OBSERVA] Job activado | job_id={job_id} | run_id={run_id}")
+    logger.info(
+        f"🟢 [OBSERVA] Job activado | job_id={job_id} | "
+        f"run_id={run_id} | monitoring_id={monitoring_id}"
+    )
     return True
-
-
 def pause_observa_job(db: Session, job_id: str) -> None:
     """
     Pausa un job bee_observa activo y elimina el run_id de sus kwargs.

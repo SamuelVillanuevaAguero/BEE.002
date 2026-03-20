@@ -1,156 +1,90 @@
 """
 app/schemas/rpa_dashboard.py
-=============================
-Schemas Pydantic para el endpoint de creación atómica de un RPA Dashboard.
 
-Cubre las tres tablas involucradas en una sola llamada:
-    - rpa_dashboard
-    - rpa_dashboard_client
-    - rpa_dashboard_business_error (opcionales)
+Fragmento RPA usa id_beecker como referencia única:
+    - Si id_beecker tiene valor y el bot existe → reutiliza
+    - Si id_beecker tiene valor y el bot NO existe → crea uno nuevo
+Fragmento UiPath usa uipath_robot_name como referencia única, misma lógica.
 """
-
 from __future__ import annotations
-
-from typing import List, Optional
-
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
-
 from app.models.automation import MonitorType, PlatformType
 
 
-# ── Subschemas ────────────────────────────────────────────────────────────────
+# ── Subschemas compartidos ────────────────────────────────────────────────────
 
 class TransactionUnitSchema(BaseModel):
-    """
-    Unidad transaccional en formato plural|singular.
-
-    Ejemplos:
-        plural="Facturas", singular="Factura"
-        plural="Archivos", singular="Archivo"
-    """
     plural: str = Field(..., max_length=100, examples=["Facturas"])
     singular: str = Field(..., max_length=100, examples=["Factura"])
 
 
 class ManageFlagsSchema(BaseModel):
+    start_active: bool = Field(True)
+    end_active: bool = Field(True)
+
+
+class JobFragment(BaseModel):
     """
-    Controla qué mensajes Slack se envían para este RPA.
-
-        start_active → envía mensaje de inicio de ejecución
-        end_active   → envía mensaje de fin de ejecución
+    Fragmento de job en el payload atómico.
+    Si viene vacío ({}) se usa trigger_type=interval con minutes=5 por defecto.
     """
-    start_active: bool = Field(True, description="Enviar mensaje de inicio a Slack.")
-    end_active: bool = Field(True, description="Enviar mensaje de fin a Slack.")
+    name: Optional[str] = Field(default=None, max_length=255)
+    description: Optional[str] = None
+    task_path: Optional[str] = Field(default="app.tasks.rpa_tasks:scheduled_rpa_status")
+    trigger_type: Optional[str] = Field(default="interval")
+    trigger_args: Optional[Dict[str, Any]] = Field(default_factory=lambda: {"minutes": 5})
 
 
-# ── Payload principal ─────────────────────────────────────────────────────────
-
-class RPADashboardCreate(BaseModel):
+class ClientFragment(BaseModel):
     """
-    Payload para crear un RPA Dashboard de forma atómica.
-
-    Crea en una sola transacción:
-        1. rpa_dashboard          (datos base del bot)
-        2. rpa_dashboard_client   (configuración operativa)
-        3. rpa_dashboard_business_error (uno por cada error en business_errors)
-
-    Campos obligatorios (columna "Obligatorios"):
-        - id_rpa          → ID de plataforma del bot (PK, lo define el usuario)
-        - id_beecker      → ID del proceso en Beecker (ej: "SAC.003")
-        - process_name    → Nombre del proceso (ej: "Procesador de facturas")
-        - platform        → Plataforma Beecker ("cloud" | "hub")
-        - id_client       → ID del cliente en la BD
-        - slack_channel   → Canal de Slack destino (ej: "#roc-sigma-raas")
-        - monitor_type    → Tipo de monitoreo ("bee_informa" | "bee_observa" | "bee_comunica")
-                            También acepta con guión medio: "bee-informa", "bee-observa"
-
-    Campos opcionales (columna "Opcionales"):
-        - transaction_unit   → Unidad transaccional con plural y singular
-        - roc_agents         → Lista de emails de agentes ROC
-        - business_errors    → Lista de mensajes de error de negocio
-        - manage_flags       → Control de mensajes de inicio/fin a Slack
+    Si id tiene valor → reutiliza el cliente existente.
+    Si id es null/omitido → crea uno nuevo con name.
     """
+    id: Optional[str] = Field(default=None, description="ID del cliente. Omitir o null = crear nuevo.")
+    name: Optional[str] = Field(default=None, max_length=150, description="Nombre (requerido si id es null).")
 
-    # ── Obligatorios: rpa_dashboard ───────────────────────────────────────────
-    id_rpa: str = Field(
-        ...,
-        max_length=100,
-        description="ID de plataforma del bot. Funciona como PK (ej: '114').",
-        examples=["114"],
-    )
-    id_beecker: str = Field(
-        ...,
-        max_length=100,
-        description="ID del proceso en Beecker (ej: 'SAC.003').",
-        examples=["SAC.003"],
-    )
-    process_name: str = Field(
-        ...,
-        max_length=200,
-        description="Nombre del proceso RPA.",
-        examples=["Procesador de facturas"],
-    )
-    platform: PlatformType = Field(
-        ...,
-        description="Plataforma Beecker donde corre el bot.",
-        examples=["cloud"],
-    )
 
-    # ── Obligatorios: rpa_dashboard_client ───────────────────────────────────
-    id_client: int = Field(
-        ...,
-        gt=0,
-        description="ID del cliente en la tabla 'client'.",
-        examples=[1],
-    )
-    slack_channel: str = Field(
-        ...,
-        max_length=100,
-        description="Canal de Slack donde se envían las notificaciones (ej: '#roc-sigma-raas').",
-        examples=["#roc-sigma-raas"],
-    )
-    monitor_type: MonitorType = Field(
-        ...,
-        description=(
-            "Tipo de monitoreo. Acepta guión bajo o guión medio. "
-            "Solo 'bee_observa' puede tener job asociado."
-        ),
-        examples=["bee_informa"],
-    )
+# ── Fragmento RPA Dashboard ───────────────────────────────────────────────────
 
-    # ── Opcionales: rpa_dashboard_client ─────────────────────────────────────
-    transaction_unit: Optional[TransactionUnitSchema] = Field(
-        default=None,
-        description=(
-            "Unidad transaccional en plural y singular. "
-            "Se almacena como 'plural|singular' (ej: 'Facturas|Factura')."
-        ),
-    )
-    roc_agents: Optional[List[str]] = Field(
-        default=None,
-        description="Lista de emails de agentes ROC que recibirán menciones en Slack.",
-        examples=[["samuel.villanueva@beecker.ai", "otro@beecker.ai"]],
-    )
-    manage_flags: Optional[ManageFlagsSchema] = Field(
-        default=None,
-        description=(
-            "Controla qué mensajes se envían a Slack. "
-            "Si no se envía, ambos flags quedan como NULL en BD."
-        ),
-        examples=[{"start_active": True, "end_active": True}],
-    )
+class RPAFragment(BaseModel):
+    """
+    id_beecker es la referencia única para Dashboard:
+        - Si el bot con ese id_beecker ya existe → se reutiliza
+        - Si no existe → se crea con los demás campos (id_rpa, process_name, platform obligatorios)
+    """
+    id_beecker: str = Field(..., description="Identificador ROC del bot (ej: 'AEC.001'). Referencia única.")
+    id_rpa: Optional[str] = Field(default=None, max_length=40, description="ID numérico de plataforma (ej: '104'). Requerido solo al crear.")
+    process_name: Optional[str] = Field(default=None, max_length=200, description="Requerido solo al crear.")
+    platform: Optional[PlatformType] = Field(default=None, description="Requerido solo al crear.")
 
-    # ── Opcionales: rpa_dashboard_business_error ──────────────────────────────
-    business_errors: Optional[List[str]] = Field(
-        default=None,
-        description="Lista de mensajes de error de negocio a registrar para este RPA.",
-        examples=[["Business Exception", "Error Factura"]],
-    )
 
-    @field_validator("id_rpa", "id_beecker", "process_name", "slack_channel", mode="before")
-    @classmethod
-    def strip_strings(cls, v: str) -> str:
-        return v.strip() if isinstance(v, str) else v
+# ── Fragmento UiPath ──────────────────────────────────────────────────────────
+
+class UiPathFragment(BaseModel):
+    """
+    uipath_robot_name es la referencia única para UiPath:
+        - Si el bot con ese nombre ya existe → se reutiliza
+        - Si no existe → se crea con los demás campos (beecker_name, framework obligatorios)
+    """
+    uipath_robot_name: str = Field(..., description="Nombre del robot UiPath. Referencia única.")
+    id_beecker: Optional[str] = Field(default=None, max_length=100)
+    beecker_name: Optional[str] = Field(default=None, max_length=200, description="Requerido solo al crear.")
+    framework: Optional[str] = Field(default=None, max_length=100, description="Requerido solo al crear.")
+
+
+# ── Payload atómico RPADashboard ──────────────────────────────────────────────
+
+class RPADashboardAtomicCreate(BaseModel):
+    client: ClientFragment
+    RPA: RPAFragment
+    slack_channel: str = Field(..., max_length=100, examples=["#roc-aeromexico-raas-test"])
+    monitor_type: MonitorType
+    transaction_unit: Optional[TransactionUnitSchema] = None
+    roc_agents: Optional[List[str]] = None
+    manage_flags: Optional[ManageFlagsSchema] = None
+    business_errors: Optional[List[str]] = None
+    job: Optional[JobFragment] = Field(default=None, description="Si se envía, crea y vincula el job automáticamente.")
 
     @field_validator("business_errors", mode="before")
     @classmethod
@@ -161,32 +95,90 @@ class RPADashboardCreate(BaseModel):
         return v
 
 
-# ── Response ──────────────────────────────────────────────────────────────────
+# ── Payload atómico RPAUiPath ─────────────────────────────────────────────────
 
-class BusinessErrorResponse(BaseModel):
-    id: int
-    error_message: str
-
-    model_config = {"from_attributes": True}
-
-
-class RPADashboardClientResponse(BaseModel):
-    id_client: int
+class RPAUiPathAtomicCreate(BaseModel):
+    client: ClientFragment
+    RPA: UiPathFragment
+    slack_channel: str = Field(..., max_length=100)
     monitor_type: MonitorType
-    transaction_unit: Optional[str] = None
-    slack_channel: Optional[str] = None
+    transaction_unit: Optional[TransactionUnitSchema] = None
+    roc_agents: Optional[List[str]] = None
+    manage_flags: Optional[ManageFlagsSchema] = None
+    business_errors: Optional[List[str]] = None
+    job: Optional[JobFragment] = None
+
+    @field_validator("business_errors", mode="before")
+    @classmethod
+    def validate_business_errors(cls, v):
+        if v is not None:
+            if not all(isinstance(e, str) and e.strip() for e in v):
+                raise ValueError("Cada error de negocio debe ser un string no vacío.")
+        return v
+
+
+# ── Patch monitoring ──────────────────────────────────────────────────────────
+
+class MonitoringPatch(BaseModel):
+    slack_channel: Optional[str] = Field(None, max_length=100)
+    monitor_type: Optional[MonitorType] = None
+    transaction_unit: Optional[TransactionUnitSchema] = None
     roc_agents: Optional[List[str]] = None
     manage_flags: Optional[ManageFlagsSchema] = None
 
+
+# ── Response schemas ──────────────────────────────────────────────────────────
+
+class ClientResponse(BaseModel):
+    id: str
+    client_name: str
+    model_config = {"from_attributes": True}
+
+
+class JobSummaryResponse(BaseModel):
+    id: str
+    name: str
+    status: str
+    trigger_type: str
+    trigger_args: Dict[str, Any]
+    next_run_time: Optional[str] = None
+    model_config = {"from_attributes": True}
+
+
+class MonitoringResponse(BaseModel):
+    id: str
+    monitor_type: MonitorType
+    slack_channel: Optional[str] = None
+    transaction_unit: Optional[str] = None
+    roc_agents: Optional[List[str]] = None
+    manage_flags: Optional[dict] = None
+    id_scheduler_job: Optional[str] = None
+    job: Optional[JobSummaryResponse] = None
     model_config = {"from_attributes": True}
 
 
 class RPADashboardResponse(BaseModel):
-    id_rpa: str
     id_beecker: str
+    id_dashboard: str
     process_name: str
     platform: PlatformType
-    client: RPADashboardClientResponse
-    business_errors: List[BusinessErrorResponse]
-
+    id_client: str
+    business_errors: Optional[List[str]] = None
     model_config = {"from_attributes": True}
+
+
+class RPAUiPathResponse(BaseModel):
+    uipath_robot_name: str
+    id_beecker: Optional[str] = None
+    beecker_name: str
+    framework: str
+    id_client: str
+    business_errors: Optional[List[str]] = None
+    model_config = {"from_attributes": True}
+
+
+class AtomicCreateResponse(BaseModel):
+    client: ClientResponse
+    rpa: dict
+    monitoring: MonitoringResponse
+    job: Optional[JobSummaryResponse] = None
