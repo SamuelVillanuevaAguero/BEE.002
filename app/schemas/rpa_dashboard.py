@@ -12,7 +12,8 @@ from pydantic import BaseModel, Field, field_validator
 from app.models.automation import MonitorType, PlatformType
 
 
-"""Subschemas compartidos"""
+# ── Subschemas compartidos ────────────────────────────────────────────────────
+
 class TransactionUnitSchema(BaseModel):
     plural: str = Field(..., max_length=100, examples=["Transacciones"])
     singular: str = Field(..., max_length=100, examples=["Transacción"])
@@ -44,7 +45,7 @@ class ClientFragment(BaseModel):
     name: Optional[str] = Field(default=None, max_length=150, description="Nombre (requerido si id es null).")
 
 
-"""Fragmento RPA Dashboard"""
+# ── Fragmento RPA Dashboard ───────────────────────────────────────────────────
 
 class RPAFragment(BaseModel):
     """
@@ -58,7 +59,8 @@ class RPAFragment(BaseModel):
     platform: Optional[PlatformType] = Field(default=None, description="Requerido solo al crear.")
 
 
-"""Fragmento UiPath"""
+# ── Fragmento UiPath ──────────────────────────────────────────────────────────
+
 class UiPathFragment(BaseModel):
     """
     uipath_robot_name es la referencia única para UiPath:
@@ -66,39 +68,18 @@ class UiPathFragment(BaseModel):
         - Si no existe → se crea con los demás campos (beecker_name, framework obligatorios)
     """
     uipath_robot_name: str = Field(..., description="Nombre del robot UiPath. Referencia única.")
-    id_beecker: str = Field(..., max_length=100)
+    id_beecker: Optional[str] = Field(default=None, max_length=40)
     beecker_name: Optional[str] = Field(default=None, max_length=200, description="Requerido solo al crear.")
     framework: Optional[str] = Field(default=None, max_length=100, description="Requerido solo al crear.")
 
 
-"""Payload atómico RPADashboard"""
+# ── Payloads atómicos ─────────────────────────────────────────────────────────
+
 class RPADashboardAtomicCreate(BaseModel):
     client: ClientFragment
     RPA: RPAFragment
-    slack_channel: str = Field(..., max_length=100, examples=["#canal-slack"])
-    monitor_type: MonitorType = Field(..., examples=["bee_informa"])
-    transaction_unit: Optional[TransactionUnitSchema] = None
-    roc_agents: Optional[List[str]] = None
-    manage_flags: Optional[ManageFlagsSchema] = None
-    business_errors: Optional[List[str]] = None
-    job: Optional[JobFragment] = Field(default=None, description="Si se envía, crea y vincula el job automáticamente.")
-
-    @field_validator("business_errors", mode="before")
-    @classmethod
-    def validate_business_errors(cls, v):
-        if v is not None:
-            if not all(isinstance(e, str) and e.strip() for e in v):
-                raise ValueError("Cada error de negocio debe ser un string no vacío.")
-        return v
-
-
-"""Payload atómico RPAUiPath"""
-
-class RPAUiPathAtomicCreate(BaseModel):
-    client: ClientFragment
-    RPA: UiPathFragment
-    slack_channel: str = Field(..., max_length=100, examples=["#slack-channel"])
-    monitor_type: MonitorType = Field(..., examples=["bee_informa"])
+    monitor_type: MonitorType
+    slack_channel: str = Field(..., max_length=100)
     transaction_unit: Optional[TransactionUnitSchema] = None
     roc_agents: Optional[List[str]] = None
     manage_flags: Optional[ManageFlagsSchema] = None
@@ -107,14 +88,121 @@ class RPAUiPathAtomicCreate(BaseModel):
 
     @field_validator("business_errors", mode="before")
     @classmethod
-    def validate_business_errors(cls, v):
-        if v is not None:
-            if not all(isinstance(e, str) and e.strip() for e in v):
-                raise ValueError("Cada error de negocio debe ser un string no vacío.")
-        return v
+    def normalize_business_errors(cls, v):
+        if v is None:
+            return []
+        return [e.strip() for e in v if e.strip()]
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "summary": "Crear bot Dashboard nuevo con job",
+                    "value": {
+                        "client": {"id": None, "name": "Empresa ABC"},
+                        "RPA": {
+                            "id_beecker": "AEC.001",
+                            "id_rpa": "114",
+                            "process_name": "Automatización Cuentas por Cobrar",
+                            "platform": "beecker",
+                        },
+                        "monitor_type": "bee_informa",
+                        "slack_channel": "#roc-notificaciones",
+                        "transaction_unit": {"plural": "Facturas", "singular": "Factura"},
+                        "roc_agents": ["agente@empresa.com"],
+                        "manage_flags": {"start_active": True, "end_active": True},
+                        "business_errors": ["Business Exception", "Application Exception"],
+                        "job": {
+                            "name": "bee-informa | AEC.001",
+                            "trigger_type": "interval",
+                            "trigger_args": {"minutes": 5},
+                        },
+                    },
+                },
+                {
+                    "summary": "Reutilizar bot y cliente existentes (sin job)",
+                    "value": {
+                        "client": {"id": "uuid-cliente-existente", "name": None},
+                        "RPA": {"id_beecker": "AEC.001"},
+                        "monitor_type": "bee_observa",
+                        "slack_channel": "#roc-alertas",
+                        "transaction_unit": {"plural": "Transacciones", "singular": "Transacción"},
+                        "roc_agents": [],
+                        "manage_flags": {"start_active": True, "end_active": False},
+                        "business_errors": [],
+                        "job": None,
+                    },
+                },
+            ]
+        }
+    }
 
 
-"""Patch monitoring"""
+class RPAUiPathAtomicCreate(BaseModel):
+    client: ClientFragment
+    RPA: UiPathFragment
+    monitor_type: MonitorType
+    slack_channel: str = Field(..., max_length=100)
+    transaction_unit: Optional[TransactionUnitSchema] = None
+    roc_agents: Optional[List[str]] = None
+    manage_flags: Optional[ManageFlagsSchema] = None
+    business_errors: Optional[List[str]] = None
+    job: Optional[JobFragment] = None
+
+    @field_validator("business_errors", mode="before")
+    @classmethod
+    def normalize_business_errors(cls, v):
+        if v is None:
+            return []
+        return [e.strip() for e in v if e.strip()]
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "summary": "Crear bot UiPath nuevo con job",
+                    "value": {
+                        "client": {"id": None, "name": "Empresa XYZ"},
+                        "RPA": {
+                            "uipath_robot_name": "Robot_Ventas_01",
+                            "id_beecker": "VNT.001",
+                            "beecker_name": "Bot Ventas",
+                            "framework": "REFramework",
+                        },
+                        "monitor_type": "bee_informa",
+                        "slack_channel": "#roc-ventas",
+                        "transaction_unit": {"plural": "Órdenes", "singular": "Orden"},
+                        "roc_agents": ["roc@empresa.com"],
+                        "manage_flags": {"start_active": True, "end_active": True},
+                        "business_errors": ["Business Rule Violation"],
+                        "job": {
+                            "name": "bee-informa | Robot_Ventas_01",
+                            "trigger_type": "interval",
+                            "trigger_args": {"minutes": 10},
+                        },
+                    },
+                },
+                {
+                    "summary": "Reutilizar bot UiPath existente",
+                    "value": {
+                        "client": {"id": "uuid-cliente-existente", "name": None},
+                        "RPA": {"uipath_robot_name": "Robot_Ventas_01"},
+                        "monitor_type": "bee_observa",
+                        "slack_channel": "#roc-ops",
+                        "transaction_unit": {"plural": "Registros", "singular": "Registro"},
+                        "roc_agents": [],
+                        "manage_flags": {"start_active": True, "end_active": True},
+                        "business_errors": [],
+                        "job": None,
+                    },
+                },
+            ]
+        }
+    }
+
+
+# ── Patch monitoring ──────────────────────────────────────────────────────────
+
 class MonitoringPatch(BaseModel):
     slack_channel: Optional[str] = Field(None, max_length=100)
     monitor_type: Optional[MonitorType] = None
@@ -122,12 +210,48 @@ class MonitoringPatch(BaseModel):
     roc_agents: Optional[List[str]] = None
     manage_flags: Optional[ManageFlagsSchema] = None
 
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "summary": "Change only the Slack channel",
+                    "value": {"slack_channel": "#roc-nuevo-canal"},
+                },
+                {
+                    "summary": "Update agents and transaction unit",
+                    "value": {
+                        "roc_agents": ["agente1@empresa.com", "agente2@empresa.com"],
+                        "transaction_unit": {"plural": "Records", "singular": "Record"},
+                    },
+                },
+                {
+                    "summary": "Full update",
+                    "value": {
+                        "slack_channel": "#roc-ops",
+                        "monitor_type": "bee_observa",
+                        "transaction_unit": {"plural": "Invoices", "singular": "Invoice"},
+                        "roc_agents": ["ops@empresa.com"],
+                        "manage_flags": {"start_active": True, "end_active": True},
+                    },
+                },
+            ]
+        }
+    }
 
-"""Response schemas"""
+
+# ── Response schemas ──────────────────────────────────────────────────────────
+
 class ClientResponse(BaseModel):
     id: str
     client_name: str
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True,
+        "json_schema_extra": {
+            "examples": [
+                {"id": "550e8400-e29b-41d4-a716-446655440000", "client_name": "Empresa ABC"}
+            ]
+        },
+    }
 
 
 class JobSummaryResponse(BaseModel):
@@ -137,7 +261,21 @@ class JobSummaryResponse(BaseModel):
     trigger_type: str
     trigger_args: Dict[str, Any]
     next_run_time: Optional[str] = None
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True,
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "id": "bee-informa|AEC.001",
+                    "name": "bee-informa | AEC.001",
+                    "status": "paused",
+                    "trigger_type": "interval",
+                    "trigger_args": {"minutes": 5},
+                    "next_run_time": None,
+                }
+            ]
+        },
+    }
 
 
 class MonitoringResponse(BaseModel):
@@ -149,7 +287,30 @@ class MonitoringResponse(BaseModel):
     manage_flags: Optional[dict] = None
     id_scheduler_job: Optional[str] = None
     job: Optional[JobSummaryResponse] = None
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True,
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "id": "a1b2c3d4-0000-0000-0000-000000000001",
+                    "monitor_type": "bee_informa",
+                    "slack_channel": "#roc-notificaciones",
+                    "transaction_unit": "Facturas / Factura",
+                    "roc_agents": ["agente@empresa.com"],
+                    "manage_flags": {"start_active": True, "end_active": True},
+                    "id_scheduler_job": "bee-informa|AEC.001",
+                    "job": {
+                        "id": "bee-informa|AEC.001",
+                        "name": "bee-informa | AEC.001",
+                        "status": "paused",
+                        "trigger_type": "interval",
+                        "trigger_args": {"minutes": 5},
+                        "next_run_time": None,
+                    },
+                }
+            ]
+        },
+    }
 
 
 class RPADashboardResponse(BaseModel):
@@ -159,7 +320,21 @@ class RPADashboardResponse(BaseModel):
     platform: PlatformType
     id_client: str
     business_errors: Optional[List[str]] = None
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True,
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "id_beecker": "AEC.001",
+                    "id_dashboard": "114",
+                    "process_name": "Accounts Receivable Automation",
+                    "platform": "beecker",
+                    "id_client": "550e8400-e29b-41d4-a716-446655440000",
+                    "business_errors": ["Business Exception", "Application Exception"],
+                }
+            ]
+        },
+    }
 
 
 class RPAUiPathResponse(BaseModel):
@@ -169,7 +344,21 @@ class RPAUiPathResponse(BaseModel):
     framework: str
     id_client: str
     business_errors: Optional[List[str]] = None
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True,
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "uipath_robot_name": "Robot_Ventas_01",
+                    "id_beecker": "VNT.001",
+                    "beecker_name": "Sales Bot",
+                    "framework": "REFramework",
+                    "id_client": "550e8400-e29b-41d4-a716-446655440000",
+                    "business_errors": ["Business Rule Violation"],
+                }
+            ]
+        },
+    }
 
 
 class AtomicCreateResponse(BaseModel):
@@ -177,3 +366,49 @@ class AtomicCreateResponse(BaseModel):
     rpa: dict
     monitoring: MonitoringResponse
     job: Optional[JobSummaryResponse] = None
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "client": {
+                        "id": "550e8400-e29b-41d4-a716-446655440000",
+                        "client_name": "Empresa ABC",
+                    },
+                    "rpa": {
+                        "id_beecker": "AEC.001",
+                        "id_dashboard": "114",
+                        "process_name": "Accounts Receivable Automation",
+                        "platform": "beecker",
+                        "id_client": "550e8400-e29b-41d4-a716-446655440000",
+                        "business_errors": ["Business Exception"],
+                    },
+                    "monitoring": {
+                        "id": "a1b2c3d4-0000-0000-0000-000000000001",
+                        "monitor_type": "bee_informa",
+                        "slack_channel": "#roc-notificaciones",
+                        "transaction_unit": "Invoices / Invoice",
+                        "roc_agents": ["agente@empresa.com"],
+                        "manage_flags": {"start_active": True, "end_active": True},
+                        "id_scheduler_job": "bee-informa|AEC.001",
+                        "job": {
+                            "id": "bee-informa|AEC.001",
+                            "name": "bee-informa | AEC.001",
+                            "status": "paused",
+                            "trigger_type": "interval",
+                            "trigger_args": {"minutes": 5},
+                            "next_run_time": None,
+                        },
+                    },
+                    "job": {
+                        "id": "bee-informa|AEC.001",
+                        "name": "bee-informa | AEC.001",
+                        "status": "paused",
+                        "trigger_type": "interval",
+                        "trigger_args": {"minutes": 5},
+                        "next_run_time": None,
+                    },
+                }
+            ]
+        }
+    }

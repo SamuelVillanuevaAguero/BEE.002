@@ -15,7 +15,7 @@ from app.routes.rpa_dashboard import dashboard_router, uipath_router
 router = APIRouter()
 
 # home / debug (TESTING)
-router.include_router(hello.router)
+#router.include_router(hello.router)
 
 # monitoring webhooks
 router.include_router(rpa.router)

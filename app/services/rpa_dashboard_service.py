@@ -285,7 +285,7 @@ def create_rpa_uipath_atomic(db: Session, payload: RPAUiPathAtomicCreate) -> dic
     }
 
 
-# ── GET: Listados ─────────────────────────────────────────────────────────────
+# ── GET: Listados generales ───────────────────────────────────────────────────
 
 def list_rpa_dashboards(db: Session) -> list:
     return db.query(RPADashboard).order_by(RPADashboard.id_beecker).all()
@@ -312,6 +312,31 @@ def list_uipath_errors(db: Session, robot_name: str) -> list[str]:
         raise HTTPException(status_code=404, detail=f"Bot UiPath '{robot_name}' no encontrado.")
     return rpa.business_errors or []
 
+
+# ── GET: Monitoreos por bot ───────────────────────────────────────────────────
+
+def list_monitoring_by_id_beecker(db: Session, id_beecker: str) -> list[dict]:
+    """
+    Devuelve todos los monitoreos configurados para un bot Dashboard específico.
+    Lanza 404 si el bot no existe en rpa_dashboard.
+    Un mismo bot puede tener N configuraciones (canales, jobs y agentes distintos).
+    """
+    rpa = db.get(RPADashboard, id_beecker)
+    if not rpa:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Bot '{id_beecker}' no encontrado en rpa_dashboard.",
+        )
+    mons = (
+        db.query(RPADashboardMonitoring)
+        .filter(RPADashboardMonitoring.id_beecker == id_beecker)
+        .options(joinedload(RPADashboardMonitoring.job))
+        .all()
+    )
+    return [_build_monitoring_response(m, m.job) for m in mons]
+
+
+# ── GET: Listados de monitoreos completos ─────────────────────────────────────
 
 def list_dashboard_monitoring(db: Session) -> list[dict]:
     mons = (
