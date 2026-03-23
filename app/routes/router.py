@@ -1,5 +1,7 @@
 """
 app/routes/router.py
+====================
+Main router: Responsible for routing all existing endpoints so that FastAPI displays them.
 """
 from fastapi import APIRouter
 
@@ -12,7 +14,7 @@ from app.routes.rpa_dashboard import dashboard_router, uipath_router
 
 router = APIRouter()
 
-# home / debug
+# home / debug (TESTING)
 router.include_router(hello.router)
 
 # monitoring webhooks
@@ -23,10 +25,9 @@ router.include_router(agent.router)
 router.include_router(jobs.router)
 router.include_router(executions.router)
 
-# automations (legacy)
+# automations
 router.include_router(automations.router)
 
-# CRUD
 router.include_router(clients.router)
 router.include_router(dashboard_router)
 router.include_router(uipath_router)

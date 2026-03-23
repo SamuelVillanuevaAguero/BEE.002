@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from app.models.job import ExecutionStatus, JobStatus, TriggerType
 
 
-# ── Trigger configs ───────────────────────────────────────────────────────────
+"""Trigger configs"""
 
 class CronTriggerArgs(BaseModel):
     """Arguments for cron trigger."""
@@ -38,7 +38,7 @@ class DateTriggerArgs(BaseModel):
     run_date: datetime
 
 
-# ── Job Schemas ───────────────────────────────────────────────────────────────
+"""Job Schemas"""
 
 class JobCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -80,7 +80,7 @@ class JobResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── Execution Schemas ─────────────────────────────────────────────────────────
+"""Execution Schemas"""
 
 class ExecutionResponse(BaseModel):
     id: int

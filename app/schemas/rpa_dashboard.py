@@ -12,11 +12,10 @@ from pydantic import BaseModel, Field, field_validator
 from app.models.automation import MonitorType, PlatformType
 
 
-# ── Subschemas compartidos ────────────────────────────────────────────────────
-
+"""Subschemas compartidos"""
 class TransactionUnitSchema(BaseModel):
-    plural: str = Field(..., max_length=100, examples=["Facturas"])
-    singular: str = Field(..., max_length=100, examples=["Factura"])
+    plural: str = Field(..., max_length=100, examples=["Transacciones"])
+    singular: str = Field(..., max_length=100, examples=["Transacción"])
 
 
 class ManageFlagsSchema(BaseModel):
@@ -45,7 +44,7 @@ class ClientFragment(BaseModel):
     name: Optional[str] = Field(default=None, max_length=150, description="Nombre (requerido si id es null).")
 
 
-# ── Fragmento RPA Dashboard ───────────────────────────────────────────────────
+"""Fragmento RPA Dashboard"""
 
 class RPAFragment(BaseModel):
     """
@@ -59,8 +58,7 @@ class RPAFragment(BaseModel):
     platform: Optional[PlatformType] = Field(default=None, description="Requerido solo al crear.")
 
 
-# ── Fragmento UiPath ──────────────────────────────────────────────────────────
-
+"""Fragmento UiPath"""
 class UiPathFragment(BaseModel):
     """
     uipath_robot_name es la referencia única para UiPath:
@@ -68,18 +66,17 @@ class UiPathFragment(BaseModel):
         - Si no existe → se crea con los demás campos (beecker_name, framework obligatorios)
     """
     uipath_robot_name: str = Field(..., description="Nombre del robot UiPath. Referencia única.")
-    id_beecker: Optional[str] = Field(default=None, max_length=100)
+    id_beecker: str = Field(..., max_length=100)
     beecker_name: Optional[str] = Field(default=None, max_length=200, description="Requerido solo al crear.")
     framework: Optional[str] = Field(default=None, max_length=100, description="Requerido solo al crear.")
 
 
-# ── Payload atómico RPADashboard ──────────────────────────────────────────────
-
+"""Payload atómico RPADashboard"""
 class RPADashboardAtomicCreate(BaseModel):
     client: ClientFragment
     RPA: RPAFragment
-    slack_channel: str = Field(..., max_length=100, examples=["#roc-aeromexico-raas-test"])
-    monitor_type: MonitorType
+    slack_channel: str = Field(..., max_length=100, examples=["#canal-slack"])
+    monitor_type: MonitorType = Field(..., examples=["bee_informa"])
     transaction_unit: Optional[TransactionUnitSchema] = None
     roc_agents: Optional[List[str]] = None
     manage_flags: Optional[ManageFlagsSchema] = None
@@ -95,13 +92,13 @@ class RPADashboardAtomicCreate(BaseModel):
         return v
 
 
-# ── Payload atómico RPAUiPath ─────────────────────────────────────────────────
+"""Payload atómico RPAUiPath"""
 
 class RPAUiPathAtomicCreate(BaseModel):
     client: ClientFragment
     RPA: UiPathFragment
-    slack_channel: str = Field(..., max_length=100)
-    monitor_type: MonitorType
+    slack_channel: str = Field(..., max_length=100, examples=["#slack-channel"])
+    monitor_type: MonitorType = Field(..., examples=["bee_informa"])
     transaction_unit: Optional[TransactionUnitSchema] = None
     roc_agents: Optional[List[str]] = None
     manage_flags: Optional[ManageFlagsSchema] = None
@@ -117,8 +114,7 @@ class RPAUiPathAtomicCreate(BaseModel):
         return v
 
 
-# ── Patch monitoring ──────────────────────────────────────────────────────────
-
+"""Patch monitoring"""
 class MonitoringPatch(BaseModel):
     slack_channel: Optional[str] = Field(None, max_length=100)
     monitor_type: Optional[MonitorType] = None
@@ -127,8 +123,7 @@ class MonitoringPatch(BaseModel):
     manage_flags: Optional[ManageFlagsSchema] = None
 
 
-# ── Response schemas ──────────────────────────────────────────────────────────
-
+"""Response schemas"""
 class ClientResponse(BaseModel):
     id: str
     client_name: str

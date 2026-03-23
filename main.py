@@ -1,3 +1,9 @@
+"""
+main.py
+========
+Main script: Launches the FastAPI service, includes all routes, origins, methods, etc.
+"""
+
 import logging
 from contextlib import asynccontextmanager
 
@@ -15,11 +21,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Startup ───────────────────────────────────────────────────────────────
     logger.info("🚀 Starting application...")
     start_scheduler()
+    
     yield
-    # ── Shutdown ──────────────────────────────────────────────────────────────
+    
     logger.info("🛑 Stopping application...")
     stop_scheduler()
 

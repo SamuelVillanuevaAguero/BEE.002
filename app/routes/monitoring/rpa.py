@@ -21,8 +21,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/rpa", tags=["RPA"])
 
 
-# ── POST /rpa/execution ───────────────────────────────────────────────────────
-
 @router.post(
     "/execution",
     response_model=ExecutionResponse,
@@ -64,8 +62,6 @@ async def start_execution(
         },
     )
 
-
-# ── PUT /rpa/execution/{execution_id} ────────────────────────────────────────
 
 @router.put(
     "/execution/{execution_id}",
