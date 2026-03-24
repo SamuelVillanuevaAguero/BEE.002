@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from app.models.job import ExecutionStatus, JobStatus, TriggerType
 
 
-"""Trigger configs"""
+# ── Trigger configs ───────────────────────────────────────────────────────────
 
 class CronTriggerArgs(BaseModel):
     """Arguments for cron trigger."""
@@ -20,6 +20,7 @@ class CronTriggerArgs(BaseModel):
     second: str | int | None = None
     start_date: datetime | None = None
     end_date: datetime | None = None
+    model_config = {"extra": "forbid"}
 
 
 class IntervalTriggerArgs(BaseModel):
@@ -31,14 +32,16 @@ class IntervalTriggerArgs(BaseModel):
     seconds: int = 0
     start_date: datetime | None = None
     end_date: datetime | None = None
+    model_config = {"extra": "forbid"}
 
 
 class DateTriggerArgs(BaseModel):
     """Arguments for date trigger (single execution)."""
     run_date: datetime
+    model_config = {"extra": "forbid"}
 
 
-"""Job Schemas"""
+# ── Job Schemas ───────────────────────────────────────────────────────────────
 
 class JobCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -55,6 +58,24 @@ class JobCreate(BaseModel):
     job_kwargs: dict[str, Any] = Field(
         default_factory=dict, description="Extra kwargs for the job function"
     )
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "name": "bee-informa | AEC.001",
+                    "description": "Monitoreo periódico del bot AEC.001",
+                    "task_path": "app.tasks.rpa_tasks:scheduled_rpa_status",
+                    "trigger_type": "interval",
+                    "trigger_args": {"minutes": 5},
+                    "job_kwargs": {
+                        "bot_id": "AEC.001",
+                        "monitoring_id": "a1b2c3d4-0000-0000-0000-000000000001",
+                    },
+                }
+            ]
+        },
+    }
 
 
 class JobUpdate(BaseModel):
@@ -62,7 +83,20 @@ class JobUpdate(BaseModel):
     description: str | None = None
     trigger_args: dict[str, Any] | None = None
     job_kwargs: dict[str, Any] | None = None
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "name": "bee-informa | AEC.001 (actualizado)",
+                    "trigger_args": {"minutes": 10},
+                }
+            ]
+        },
+    }
 
+
+# ── Response schemas (SIN extra=forbid — vienen de la BD) ────────────────────
 
 class JobResponse(BaseModel):
     id: str
@@ -76,11 +110,8 @@ class JobResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     next_run_time: datetime | None
-
     model_config = {"from_attributes": True}
 
-
-"""Execution Schemas"""
 
 class ExecutionResponse(BaseModel):
     id: int
@@ -91,7 +122,6 @@ class ExecutionResponse(BaseModel):
     duration_ms: int | None
     output: str | None
     error: str | None
-
     model_config = {"from_attributes": True}
 
 

@@ -42,7 +42,7 @@ def _build_job_response(job: Job | None) -> dict | None:
 def _build_monitoring_response(mon, job: Job | None) -> dict:
     return {
         "id": mon.id,
-        "monitor_type": mon.monitor_type,
+        "monitor_type": mon.monitor_type.value if hasattr(mon.monitor_type, "value") else mon.monitor_type,
         "slack_channel": mon.slack_channel,
         "transaction_unit": mon.transaction_unit,
         "roc_agents": mon.roc_agents,

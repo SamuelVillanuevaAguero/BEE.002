@@ -14,19 +14,40 @@ class ClientFragment(BaseModel):
     """
     id: Optional[str] = Field(default=None, description="ID del cliente. Null = crear nuevo.")
     name: Optional[str] = Field(default=None, max_length=150, description="Nombre del cliente (requerido si id es null).")
+    model_config = {"extra": "forbid"}
 
 
 class ClientCreate(BaseModel):
     id: Optional[str] = Field(default=None, max_length=100, description="Si no se envía o está vacío, se genera un UUID.")
     client_name: str = Field(..., max_length=150, examples=["Aeroméxico"])
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "id": None,
+                    "client_name": "Aeroméxico",
+                }
+            ]
+        },
+    }
 
 
 class ClientUpdate(BaseModel):
     client_name: str = Field(..., max_length=150)
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "client_name": "Aeroméxico Internacional",
+                }
+            ]
+        },
+    }
 
 
 class ClientResponse(BaseModel):
     id: str
     client_name: str
-
     model_config = {"from_attributes": True}

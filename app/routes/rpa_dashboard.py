@@ -4,9 +4,9 @@ app/routes/rpa_dashboard.py
 Endpoints:
     POST   /rpa-dashboard/                              → Create dashboard bot (atomic)
     GET    /rpa-dashboard/                              → List dashboard bots
-    GET    /rpa-dashboard/monitoring                    → List all dashboard monitorings (+ job)
-    GET    /rpa-dashboard/{id_beecker}/errors           → List bot business errors
-    GET    /rpa-dashboard/{id_beecker}/monitoring       → List bot monitorings by id_beecker
+    GET    /rpa-dashboard/monitoring                    → List all monitorings (+ job)
+    GET    /rpa-dashboard/{id_beecker}/errors           → List business errors of the bot
+    GET    /rpa-dashboard/{id_beecker}/monitoring       → List monitorings of the bot by id_beecker
     PATCH  /rpa-dashboard/monitoring/{monitoring_id}    → Update monitoring
     DELETE /rpa-dashboard/monitoring/{monitoring_id}    → Delete monitoring (+ job if linked)
 
@@ -18,11 +18,12 @@ Endpoints:
     DELETE /rpa-uipath/monitoring/{monitoring_id}       → Delete monitoring (+ job if linked)
 
 NOTE: Routes with a literal segment (/monitoring) must be declared BEFORE routes
-with a path parameter (/{id_beecker}/...) so that FastAPI resolves them correctly.
+with a parameter (/{id_beecker}/...) so that FastAPI resolves them correctly.
 """
 import logging
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
+
 from app.db.session import get_db
 from app.schemas.rpa_dashboard import (
     RPADashboardAtomicCreate,
@@ -31,21 +32,82 @@ from app.schemas.rpa_dashboard import (
     RPADashboardResponse,
     RPAUiPathResponse,
     AtomicCreateResponse,
+    MonitoringResponse,
 )
 from app.services import rpa_dashboard_service
 from app.utils.auth import verify_api_key
+from app.utils.responses import (
+    R200, R200_list, R200_str_list, R201, R204,
+    R404, COMMON,
+)
 
 logger = logging.getLogger(__name__)
 
 dashboard_router = APIRouter(prefix="/rpa-dashboard", tags=["RPA Dashboard"])
 uipath_router = APIRouter(prefix="/rpa-uipath", tags=["RPA UiPath"])
 
-# ── Common reusable responses ─────────────────────────────────────────────────
-_R401 = {401: {"description": "Invalid or missing API Key"}}
-_R404 = {404: {"description": "Resource not found"}}
-_R422 = {422: {"description": "Payload validation error"}}
-_R500 = {500: {"description": "Internal server error"}}
-_COMMON = {**_R401, **_R422, **_R500}
+
+# ── Reusable examples ────────────────────────────────────────────────────────
+
+_MONITORING_EXAMPLE = {
+    "id": "a1b2c3d4-0000-0000-0000-000000000001",
+    "monitor_type": "bee_informa",
+    "slack_channel": "#roc-notificaciones",
+    "transaction_unit": "Facturas|Factura",
+    "roc_agents": ["agente@empresa.com"],
+    "manage_flags": {"start_active": True, "end_active": True},
+    "id_scheduler_job": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "job": {
+        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "name": "bee-informa | AEC.001",
+        "status": "paused",
+        "trigger_type": "interval",
+        "trigger_args": {"minutes": 5},
+        "next_run_time": None,
+    },
+}
+
+_ATOMIC_CREATE_EXAMPLE = {
+    "client": {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "client_name": "Empresa ABC",
+    },
+    "rpa": {
+        "id_beecker": "AEC.001",
+        "id_dashboard": "114",
+        "process_name": "Accounts Receivable Automation",
+        "platform": "beecker",
+        "id_client": "550e8400-e29b-41d4-a716-446655440000",
+        "business_errors": ["Business Exception"],
+    },
+    "monitoring": _MONITORING_EXAMPLE,
+    "job": {
+        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "name": "bee-informa | AEC.001",
+        "status": "paused",
+        "trigger_type": "interval",
+        "trigger_args": {"minutes": 5},
+        "next_run_time": None,
+    },
+}
+
+_DASHBOARD_BOT_EXAMPLE = {
+    "id_beecker": "AEC.001",
+    "id_dashboard": "114",
+    "process_name": "Accounts Receivable Automation",
+    "platform": "beecker",
+    "id_client": "550e8400-e29b-41d4-a716-446655440000",
+    "business_errors": ["Business Exception", "Application Exception"],
+}
+
+_UIPATH_BOT_EXAMPLE = {
+    "uipath_robot_name": "Robot_Ventas_01",
+    "id_beecker": "VNT.001",
+    "beecker_name": "Bot Ventas",
+    "framework": "REFramework",
+    "id_client": "550e8400-e29b-41d4-a716-446655440000",
+    "business_errors": ["Business Rule Violation"],
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -54,6 +116,7 @@ _COMMON = {**_R401, **_R422, **_R500}
 
 @dashboard_router.post(
     "/",
+    response_model=AtomicCreateResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create Dashboard bot (atomic)",
     description=(
@@ -61,8 +124,8 @@ _COMMON = {**_R401, **_R422, **_R500}
         "monitoring and job (paused). If the bot already exists by id_beecker, it is reused."
     ),
     responses={
-        201: {"description": "Bot and monitoring created successfully"},
-        **_COMMON,
+        **R201(_ATOMIC_CREATE_EXAMPLE, "Bot and monitoring created successfully"),
+        **COMMON,
     },
 )
 def create_rpa_dashboard(
@@ -78,8 +141,8 @@ def create_rpa_dashboard(
     response_model=list[RPADashboardResponse],
     summary="List Dashboard bots",
     responses={
-        200: {"description": "List of registered bots"},
-        **_COMMON,
+        **R200_list([_DASHBOARD_BOT_EXAMPLE], "List of registered bots"),
+        **COMMON,
     },
 )
 def list_rpa_dashboards(
@@ -91,11 +154,12 @@ def list_rpa_dashboards(
 
 @dashboard_router.get(
     "/monitoring",
+    response_model=list[MonitoringResponse],
     summary="List all Dashboard monitorings with job info",
     description="Returns all rpa_dashboard_monitoring records with the nested job.",
     responses={
-        200: {"description": "List of monitorings with jobs"},
-        **_COMMON,
+        **R200_list([_MONITORING_EXAMPLE], "List of monitorings with jobs"),
+        **COMMON,
     },
 )
 def list_dashboard_monitoring(
@@ -108,11 +172,14 @@ def list_dashboard_monitoring(
 @dashboard_router.get(
     "/{id_beecker}/errors",
     response_model=list[str],
-    summary="List Dashboard bot business errors",
+    summary="List business errors of the Dashboard bot",
     responses={
-        200: {"description": "List of configured business errors"},
-        **_R404,
-        **_COMMON,
+        **R200_str_list(
+            ["Business Exception", "Application Exception"],
+            "List of configured business errors",
+        ),
+        **R404,
+        **COMMON,
     },
 )
 def list_dashboard_errors(
@@ -125,15 +192,16 @@ def list_dashboard_errors(
 
 @dashboard_router.get(
     "/{id_beecker}/monitoring",
-    summary="List Dashboard bot monitorings by id_beecker",
+    response_model=list[MonitoringResponse],
+    summary="List monitorings of a Dashboard bot by id_beecker",
     description=(
-        "Returns all rpa_dashboard_monitoring records linked to the bot. "
-        "A single bot can have N configurations (different channels, jobs, and agents)."
+        "Returns all rpa_dashboard_monitoring records associated with the bot. "
+        "A single bot can have N configurations (different channels, jobs and agents)."
     ),
     responses={
-        200: {"description": "List of bot monitorings with jobs"},
-        **_R404,
-        **_COMMON,
+        **R200_list([_MONITORING_EXAMPLE], "List of bot monitorings with jobs"),
+        **R404,
+        **COMMON,
     },
 )
 def list_monitoring_by_id_beecker(
@@ -146,12 +214,13 @@ def list_monitoring_by_id_beecker(
 
 @dashboard_router.patch(
     "/monitoring/{monitoring_id}",
+    response_model=MonitoringResponse,
     summary="Update Dashboard monitoring",
-    description="Updates the channel, flags, agents, and transactional unit of the monitoring.",
+    description="Updates the channel, flags, agents and transactional unit of the monitoring.",
     responses={
-        200: {"description": "Monitoring updated"},
-        **_R404,
-        **_COMMON,
+        **R200(_MONITORING_EXAMPLE, "Monitoring updated"),
+        **R404,
+        **COMMON,
     },
 )
 def patch_dashboard_monitoring(
@@ -172,9 +241,9 @@ def patch_dashboard_monitoring(
         "it removes it from APScheduler and deletes it in cascade."
     ),
     responses={
-        204: {"description": "Monitoring deleted successfully"},
-        **_R404,
-        **_COMMON,
+        **R204,
+        **R404,
+        **COMMON,
     },
 )
 def delete_dashboard_monitoring(
@@ -191,6 +260,7 @@ def delete_dashboard_monitoring(
 
 @uipath_router.post(
     "/",
+    response_model=AtomicCreateResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create UiPath bot (atomic)",
     description=(
@@ -198,8 +268,8 @@ def delete_dashboard_monitoring(
         "monitoring and job (paused). If the bot already exists by uipath_robot_name, it is reused."
     ),
     responses={
-        201: {"description": "Bot and monitoring created successfully"},
-        **_COMMON,
+        **R201(_ATOMIC_CREATE_EXAMPLE, "Bot and monitoring created successfully"),
+        **COMMON,
     },
 )
 def create_rpa_uipath(
@@ -215,8 +285,8 @@ def create_rpa_uipath(
     response_model=list[RPAUiPathResponse],
     summary="List UiPath bots",
     responses={
-        200: {"description": "List of registered UiPath bots"},
-        **_COMMON,
+        **R200_list([_UIPATH_BOT_EXAMPLE], "List of registered UiPath bots"),
+        **COMMON,
     },
 )
 def list_rpa_uipath(
@@ -228,11 +298,12 @@ def list_rpa_uipath(
 
 @uipath_router.get(
     "/monitoring",
+    response_model=list[MonitoringResponse],
     summary="List all UiPath monitorings with job info",
     description="Returns all rpa_uipath_monitoring records with the nested job.",
     responses={
-        200: {"description": "List of monitorings with jobs"},
-        **_COMMON,
+        **R200_list([_MONITORING_EXAMPLE], "List of monitorings with jobs"),
+        **COMMON,
     },
 )
 def list_uipath_monitoring(
@@ -245,11 +316,14 @@ def list_uipath_monitoring(
 @uipath_router.get(
     "/{robot_name}/errors",
     response_model=list[str],
-    summary="List UiPath bot business errors",
+    summary="List business errors of the UiPath bot",
     responses={
-        200: {"description": "List of configured business errors"},
-        **_R404,
-        **_COMMON,
+        **R200_str_list(
+            ["Business Rule Violation"],
+            "List of configured business errors",
+        ),
+        **R404,
+        **COMMON,
     },
 )
 def list_uipath_errors(
@@ -262,12 +336,13 @@ def list_uipath_errors(
 
 @uipath_router.patch(
     "/monitoring/{monitoring_id}",
+    response_model=MonitoringResponse,
     summary="Update UiPath monitoring",
-    description="Updates the channel, flags, agents, and transactional unit of the monitoring.",
+    description="Updates the channel, flags, agents and transactional unit of the monitoring.",
     responses={
-        200: {"description": "Monitoring updated"},
-        **_R404,
-        **_COMMON,
+        **R200(_MONITORING_EXAMPLE, "Monitoring updated"),
+        **R404,
+        **COMMON,
     },
 )
 def patch_uipath_monitoring(
@@ -288,9 +363,9 @@ def patch_uipath_monitoring(
         "it removes it from APScheduler and deletes it in cascade."
     ),
     responses={
-        204: {"description": "Monitoring deleted successfully"},
-        **_R404,
-        **_COMMON,
+        **R204,
+        **R404,
+        **COMMON,
     },
 )
 def delete_uipath_monitoring(

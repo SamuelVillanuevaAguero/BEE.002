@@ -121,9 +121,9 @@ class BeeckerAPI:
         """
         self._platform     = self._build_platform(platform)
         self.platform_name = platform.lower()
-        print(
-            f"[BeeckerAPI] Plataforma cambiada a '{self.platform_name}'. "
-            "Recuerda hacer login() de nuevo."
+        logger.info(
+            f"[BeeckerAPI] Platform changed to '{self.platform_name}'. "
+            "Remember to call login() again."
         )
 
     async def login(self, email: str, password: str) -> Dict[str, Any]:
@@ -640,7 +640,7 @@ class BeeckerAPI:
         interval_start_str = interval_start.strftime("%Y-%m-%d %H:%M:%S")
         interval_end_str   = interval_end.strftime("%Y-%m-%d %H:%M:%S")
 
-        print(
+        logger.info(
             f"[{self.platform_name.upper()}] get_agent_status "
             f"agent_id={agent_id} | {interval_start_str} → {interval_end_str}"
         )
@@ -689,7 +689,7 @@ class BeeckerAPI:
                 break
             current_page += 1
 
-        print(f"  → {len(executions_in_range)} ejecuciones encontradas en el intervalo.")
+        logger.info(f"  → {len(executions_in_range)} executions found in the interval.")
 
         # ── 3. Contadores por estado ──────────────────────────────────────────
         STATE_COMPLETED         = "completed"
@@ -826,7 +826,7 @@ class BeeckerAPI:
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-        print(f"[BeeckerAPI] Exportado: {filename} ({data['total_transactions']} transacciones)")
+        logger.info(f"[BeeckerAPI] Exported: {filename} ({data['total_transactions']} transactions)")
         return filename
 
     @staticmethod

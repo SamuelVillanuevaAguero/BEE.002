@@ -11,11 +11,9 @@ from app.routes.jobs import jobs, executions
 from app.routes import automations
 from app.routes import clients
 from app.routes.rpa_dashboard import dashboard_router, uipath_router
+from app.utils.responses import R200, R500
 
 router = APIRouter()
-
-# home / debug (TESTING)
-#router.include_router(hello.router)
 
 # monitoring webhooks
 router.include_router(rpa.router)
@@ -33,7 +31,18 @@ router.include_router(dashboard_router)
 router.include_router(uipath_router)
 
 
-@router.get("/health", tags=["Health"])
+@router.get(
+    "/health",
+    tags=["Health"],
+    summary="Check service health",
+    responses={
+        **R200(
+            {"status": "ok", "scheduler_running": True, "jobs_count": 3},
+            "Service is operational",
+        ),
+        **R500,
+    },
+)
 def health():
     from app.core.scheduler import scheduler
     return {

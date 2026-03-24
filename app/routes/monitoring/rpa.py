@@ -1,7 +1,7 @@
 """
 app/routes/monitoring/rpa.py
 =============================
-Endpoints for receiving start and end notifications of RPA executions
+Endpoints to receive start and end notifications of RPA executions
 from the Beecker platform (BAP).
 """
 
@@ -16,16 +16,34 @@ from app.schemas.rpa import RPAExecutionPayload, RPAExecutionUpdatePayload
 from app.schemas.response import ExecutionResponse
 from app.services import rpa_orchestration_service
 from app.utils.auth import verify_api_key
+from app.utils.responses import R202, R200, R401, R404, R422, R500, COMMON
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/rpa", tags=["RPA"])
 
-# ── Respuestas comunes ────────────────────────────────────────────────────────
-_R401 = {401: {"description": "Invalid or missing API Key"}}
-_R404 = {404: {"description": "Bot not registered in the database"}}
-_R422 = {422: {"description": "Payload validation error"}}
-_R500 = {500: {"description": "Internal server error"}}
+# ── Execution response example ────────────────────────────────────────────────
+_EXECUTION_EXAMPLE = {
+    "success": True,
+    "message": "Execution start received for 'AEC.001'.",
+    "data": {
+        "id": "98765",
+        "bot_name": "AEC.001",
+        "bot_id": "114",
+        "status": "started",
+    },
+}
+
+_EXECUTION_END_EXAMPLE = {
+    "success": True,
+    "message": "Execution end received for 'AEC.001'.",
+    "data": {
+        "id": "98765",
+        "bot_name": "AEC.001",
+        "bot_id": "114",
+        "status": "completed",
+    },
+}
 
 
 @router.post(
@@ -35,16 +53,16 @@ _R500 = {500: {"description": "Internal server error"}}
     summary="Notifies the start of an RPA execution",
     description=(
         "Receives the start payload from the BAP. "
-        "Synchronously validates that `bot_id` (id_dashboard) exists in rpa_dashboard. "
-        "If the bot is not registered, returns 404 before queuing the process. "
+        "Synchronously validates that the `bot_id` (id_dashboard) exists in rpa_dashboard. "
+        "If the bot is not registered it returns 404 before queuing the process. "
         "Sends a start message to Slack according to the bot configuration."
     ),
     responses={
-        202: {"description": "Execution start accepted and queued in background"},
-        **_R401,
-        **_R404,
-        **_R422,
-        **_R500,
+        **R202(_EXECUTION_EXAMPLE, "Execution start accepted and queued in background"),
+        **R401,
+        **R404,
+        **R422,
+        **R500,
     },
 )
 async def start_execution(
@@ -55,9 +73,8 @@ async def start_execution(
 ) -> ExecutionResponse:
     """
     1. Synchronously validates that bot_id (id_dashboard) is registered in rpa_dashboard.
-    2. Queues handle_execution_start in background and responds 202 immediately.
+    2. Queues handle_execution_start in the background and responds 202 immediately.
     """
-    # ── Validation: the bot must exist in the DB ─────────────────────────────
     bot_exists = (
         db.query(RPADashboard)
         .filter(RPADashboard.id_dashboard == payload.bot_id)
@@ -107,10 +124,10 @@ async def start_execution(
         "Queries the full status in Beecker and sends an end notification to Slack."
     ),
     responses={
-        200: {"description": "Execution end received and queued in background"},
-        **_R401,
-        **_R422,
-        **_R500,
+        **R200(_EXECUTION_END_EXAMPLE, "Execution end received and queued in background"),
+        **R401,
+        **R422,
+        **R500,
     },
 )
 async def end_execution(
@@ -121,10 +138,9 @@ async def end_execution(
     api_key: str = Depends(verify_api_key),
 ) -> ExecutionResponse:
     """
-    End of execution → send_status_rpa()
-
+    Execution end → send_status_rpa()
     execution_id corresponds to the numeric run_id from Beecker.
-    The process runs in background to respond 200 immediately.
+    The process runs in the background to respond 200 immediately.
     """
     background_tasks.add_task(
         rpa_orchestration_service.handle_execution_end,

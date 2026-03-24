@@ -1,6 +1,9 @@
 """
 app/schemas/rpa_dashboard.py
 
+Todos los schemas de REQUEST tienen extra="forbid":
+    → Campos desconocidos en el payload devuelven 422 automáticamente.
+
 Fragmento RPA usa id_beecker como referencia única:
     - Si id_beecker tiene valor y el bot existe → reutiliza
     - Si id_beecker tiene valor y el bot NO existe → crea uno nuevo
@@ -17,11 +20,13 @@ from app.models.automation import MonitorType, PlatformType
 class TransactionUnitSchema(BaseModel):
     plural: str = Field(..., max_length=100, examples=["Transacciones"])
     singular: str = Field(..., max_length=100, examples=["Transacción"])
+    model_config = {"extra": "forbid"}
 
 
 class ManageFlagsSchema(BaseModel):
     start_active: bool = Field(True)
     end_active: bool = Field(True)
+    model_config = {"extra": "forbid"}
 
 
 class JobFragment(BaseModel):
@@ -34,6 +39,7 @@ class JobFragment(BaseModel):
     task_path: Optional[str] = Field(default="app.tasks.rpa_tasks:scheduled_rpa_status")
     trigger_type: Optional[str] = Field(default="interval")
     trigger_args: Optional[Dict[str, Any]] = Field(default_factory=lambda: {"minutes": 5})
+    model_config = {"extra": "forbid"}
 
 
 class ClientFragment(BaseModel):
@@ -43,6 +49,7 @@ class ClientFragment(BaseModel):
     """
     id: Optional[str] = Field(default=None, description="ID del cliente. Omitir o null = crear nuevo.")
     name: Optional[str] = Field(default=None, max_length=150, description="Nombre (requerido si id es null).")
+    model_config = {"extra": "forbid"}
 
 
 # ── Fragmento RPA Dashboard ───────────────────────────────────────────────────
@@ -54,9 +61,10 @@ class RPAFragment(BaseModel):
         - Si no existe → se crea con los demás campos (id_rpa, process_name, platform obligatorios)
     """
     id_beecker: str = Field(..., description="Identificador ROC del bot (ej: 'AEC.001'). Referencia única.")
-    id_rpa: Optional[str] = Field(default=None, max_length=40, description="ID numérico de plataforma (ej: '104'). Requerido solo al crear.")
+    id_rpa: Optional[str] = Field(default=None, max_length=40, description="ID numérico de plataforma (ej: '114'). Requerido solo al crear.")
     process_name: Optional[str] = Field(default=None, max_length=200, description="Requerido solo al crear.")
     platform: Optional[PlatformType] = Field(default=None, description="Requerido solo al crear.")
+    model_config = {"extra": "forbid"}
 
 
 # ── Fragmento UiPath ──────────────────────────────────────────────────────────
@@ -71,6 +79,7 @@ class UiPathFragment(BaseModel):
     id_beecker: Optional[str] = Field(default=None, max_length=40)
     beecker_name: Optional[str] = Field(default=None, max_length=200, description="Requerido solo al crear.")
     framework: Optional[str] = Field(default=None, max_length=100, description="Requerido solo al crear.")
+    model_config = {"extra": "forbid"}
 
 
 # ── Payloads atómicos ─────────────────────────────────────────────────────────
@@ -86,6 +95,13 @@ class RPADashboardAtomicCreate(BaseModel):
     business_errors: Optional[List[str]] = None
     job: Optional[JobFragment] = None
 
+    @field_validator("monitor_type", mode="before")
+    @classmethod
+    def normalize_monitor_type(cls, v):
+        if isinstance(v, str):
+            return v.replace("_", "-")
+        return v
+
     @field_validator("business_errors", mode="before")
     @classmethod
     def normalize_business_errors(cls, v):
@@ -94,47 +110,31 @@ class RPADashboardAtomicCreate(BaseModel):
         return [e.strip() for e in v if e.strip()]
 
     model_config = {
+        "extra": "forbid",
         "json_schema_extra": {
             "examples": [
                 {
-                    "summary": "Crear bot Dashboard nuevo con job",
-                    "value": {
-                        "client": {"id": None, "name": "Empresa ABC"},
-                        "RPA": {
-                            "id_beecker": "AEC.001",
-                            "id_rpa": "114",
-                            "process_name": "Automatización Cuentas por Cobrar",
-                            "platform": "beecker",
-                        },
-                        "monitor_type": "bee_informa",
-                        "slack_channel": "#roc-notificaciones",
-                        "transaction_unit": {"plural": "Facturas", "singular": "Factura"},
-                        "roc_agents": ["agente@empresa.com"],
-                        "manage_flags": {"start_active": True, "end_active": True},
-                        "business_errors": ["Business Exception", "Application Exception"],
-                        "job": {
-                            "name": "bee-informa | AEC.001",
-                            "trigger_type": "interval",
-                            "trigger_args": {"minutes": 5},
-                        },
+                    "client": {"id": None, "name": "Empresa ABC"},
+                    "RPA": {
+                        "id_beecker": "AEC.001",
+                        "id_rpa": "114",
+                        "process_name": "Automatización Cuentas por Cobrar",
+                        "platform": "beecker",
                     },
-                },
-                {
-                    "summary": "Reutilizar bot y cliente existentes (sin job)",
-                    "value": {
-                        "client": {"id": "uuid-cliente-existente", "name": None},
-                        "RPA": {"id_beecker": "AEC.001"},
-                        "monitor_type": "bee_observa",
-                        "slack_channel": "#roc-alertas",
-                        "transaction_unit": {"plural": "Transacciones", "singular": "Transacción"},
-                        "roc_agents": [],
-                        "manage_flags": {"start_active": True, "end_active": False},
-                        "business_errors": [],
-                        "job": None,
+                    "monitor_type": "bee_informa",
+                    "slack_channel": "#roc-notificaciones",
+                    "transaction_unit": {"plural": "Facturas", "singular": "Factura"},
+                    "roc_agents": ["agente@empresa.com"],
+                    "manage_flags": {"start_active": True, "end_active": True},
+                    "business_errors": ["Business Exception", "Application Exception"],
+                    "job": {
+                        "name": "bee-informa | AEC.001",
+                        "trigger_type": "interval",
+                        "trigger_args": {"minutes": 5},
                     },
-                },
+                }
             ]
-        }
+        },
     }
 
 
@@ -149,6 +149,13 @@ class RPAUiPathAtomicCreate(BaseModel):
     business_errors: Optional[List[str]] = None
     job: Optional[JobFragment] = None
 
+    @field_validator("monitor_type", mode="before")
+    @classmethod
+    def normalize_monitor_type(cls, v):
+        if isinstance(v, str):
+            return v.replace("_", "-")
+        return v
+
     @field_validator("business_errors", mode="before")
     @classmethod
     def normalize_business_errors(cls, v):
@@ -157,47 +164,31 @@ class RPAUiPathAtomicCreate(BaseModel):
         return [e.strip() for e in v if e.strip()]
 
     model_config = {
+        "extra": "forbid",
         "json_schema_extra": {
             "examples": [
                 {
-                    "summary": "Crear bot UiPath nuevo con job",
-                    "value": {
-                        "client": {"id": None, "name": "Empresa XYZ"},
-                        "RPA": {
-                            "uipath_robot_name": "Robot_Ventas_01",
-                            "id_beecker": "VNT.001",
-                            "beecker_name": "Bot Ventas",
-                            "framework": "REFramework",
-                        },
-                        "monitor_type": "bee_informa",
-                        "slack_channel": "#roc-ventas",
-                        "transaction_unit": {"plural": "Órdenes", "singular": "Orden"},
-                        "roc_agents": ["roc@empresa.com"],
-                        "manage_flags": {"start_active": True, "end_active": True},
-                        "business_errors": ["Business Rule Violation"],
-                        "job": {
-                            "name": "bee-informa | Robot_Ventas_01",
-                            "trigger_type": "interval",
-                            "trigger_args": {"minutes": 10},
-                        },
+                    "client": {"id": None, "name": "Empresa XYZ"},
+                    "RPA": {
+                        "uipath_robot_name": "Robot_Ventas_01",
+                        "id_beecker": "VNT.001",
+                        "beecker_name": "Bot Ventas",
+                        "framework": "REFramework",
                     },
-                },
-                {
-                    "summary": "Reutilizar bot UiPath existente",
-                    "value": {
-                        "client": {"id": "uuid-cliente-existente", "name": None},
-                        "RPA": {"uipath_robot_name": "Robot_Ventas_01"},
-                        "monitor_type": "bee_observa",
-                        "slack_channel": "#roc-ops",
-                        "transaction_unit": {"plural": "Registros", "singular": "Registro"},
-                        "roc_agents": [],
-                        "manage_flags": {"start_active": True, "end_active": True},
-                        "business_errors": [],
-                        "job": None,
+                    "monitor_type": "bee_informa",
+                    "slack_channel": "#roc-ventas",
+                    "transaction_unit": {"plural": "Órdenes", "singular": "Orden"},
+                    "roc_agents": ["roc@empresa.com"],
+                    "manage_flags": {"start_active": True, "end_active": True},
+                    "business_errors": ["Business Rule Violation"],
+                    "job": {
+                        "name": "bee-informa | Robot_Ventas_01",
+                        "trigger_type": "interval",
+                        "trigger_args": {"minutes": 10},
                     },
-                },
+                }
             ]
-        }
+        },
     }
 
 
@@ -210,36 +201,30 @@ class MonitoringPatch(BaseModel):
     roc_agents: Optional[List[str]] = None
     manage_flags: Optional[ManageFlagsSchema] = None
 
+    @field_validator("monitor_type", mode="before")
+    @classmethod
+    def normalize_monitor_type(cls, v):
+        if isinstance(v, str):
+            return v.replace("_", "-")
+        return v
+
     model_config = {
+        "extra": "forbid",
         "json_schema_extra": {
             "examples": [
                 {
-                    "summary": "Change only the Slack channel",
-                    "value": {"slack_channel": "#roc-nuevo-canal"},
-                },
-                {
-                    "summary": "Update agents and transaction unit",
-                    "value": {
-                        "roc_agents": ["agente1@empresa.com", "agente2@empresa.com"],
-                        "transaction_unit": {"plural": "Records", "singular": "Record"},
-                    },
-                },
-                {
-                    "summary": "Full update",
-                    "value": {
-                        "slack_channel": "#roc-ops",
-                        "monitor_type": "bee_observa",
-                        "transaction_unit": {"plural": "Invoices", "singular": "Invoice"},
-                        "roc_agents": ["ops@empresa.com"],
-                        "manage_flags": {"start_active": True, "end_active": True},
-                    },
-                },
+                    "slack_channel": "#roc-ops",
+                    "monitor_type": "bee_observa",
+                    "transaction_unit": {"plural": "Facturas", "singular": "Factura"},
+                    "roc_agents": ["agente1@empresa.com", "agente2@empresa.com"],
+                    "manage_flags": {"start_active": True, "end_active": True},
+                }
             ]
-        }
+        },
     }
 
 
-# ── Response schemas ──────────────────────────────────────────────────────────
+# ── Response schemas (from_attributes=True, SIN extra=forbid) ────────────────
 
 class ClientResponse(BaseModel):
     id: str
@@ -248,7 +233,10 @@ class ClientResponse(BaseModel):
         "from_attributes": True,
         "json_schema_extra": {
             "examples": [
-                {"id": "550e8400-e29b-41d4-a716-446655440000", "client_name": "Empresa ABC"}
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "client_name": "Empresa ABC",
+                }
             ]
         },
     }
@@ -266,7 +254,7 @@ class JobSummaryResponse(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "id": "bee-informa|AEC.001",
+                    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                     "name": "bee-informa | AEC.001",
                     "status": "paused",
                     "trigger_type": "interval",
@@ -295,12 +283,12 @@ class MonitoringResponse(BaseModel):
                     "id": "a1b2c3d4-0000-0000-0000-000000000001",
                     "monitor_type": "bee_informa",
                     "slack_channel": "#roc-notificaciones",
-                    "transaction_unit": "Facturas / Factura",
+                    "transaction_unit": "Facturas|Factura",
                     "roc_agents": ["agente@empresa.com"],
                     "manage_flags": {"start_active": True, "end_active": True},
-                    "id_scheduler_job": "bee-informa|AEC.001",
+                    "id_scheduler_job": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                     "job": {
-                        "id": "bee-informa|AEC.001",
+                        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "bee-informa | AEC.001",
                         "status": "paused",
                         "trigger_type": "interval",
@@ -327,7 +315,7 @@ class RPADashboardResponse(BaseModel):
                 {
                     "id_beecker": "AEC.001",
                     "id_dashboard": "114",
-                    "process_name": "Accounts Receivable Automation",
+                    "process_name": "Automatización Cuentas por Cobrar",
                     "platform": "beecker",
                     "id_client": "550e8400-e29b-41d4-a716-446655440000",
                     "business_errors": ["Business Exception", "Application Exception"],
@@ -351,7 +339,7 @@ class RPAUiPathResponse(BaseModel):
                 {
                     "uipath_robot_name": "Robot_Ventas_01",
                     "id_beecker": "VNT.001",
-                    "beecker_name": "Sales Bot",
+                    "beecker_name": "Bot Ventas",
                     "framework": "REFramework",
                     "id_client": "550e8400-e29b-41d4-a716-446655440000",
                     "business_errors": ["Business Rule Violation"],
@@ -363,11 +351,12 @@ class RPAUiPathResponse(BaseModel):
 
 class AtomicCreateResponse(BaseModel):
     client: ClientResponse
-    rpa: dict
+    rpa: RPADashboardResponse | RPAUiPathResponse
     monitoring: MonitoringResponse
     job: Optional[JobSummaryResponse] = None
 
     model_config = {
+        "from_attributes": True,
         "json_schema_extra": {
             "examples": [
                 {
@@ -378,7 +367,7 @@ class AtomicCreateResponse(BaseModel):
                     "rpa": {
                         "id_beecker": "AEC.001",
                         "id_dashboard": "114",
-                        "process_name": "Accounts Receivable Automation",
+                        "process_name": "Automatización Cuentas por Cobrar",
                         "platform": "beecker",
                         "id_client": "550e8400-e29b-41d4-a716-446655440000",
                         "business_errors": ["Business Exception"],
@@ -387,12 +376,12 @@ class AtomicCreateResponse(BaseModel):
                         "id": "a1b2c3d4-0000-0000-0000-000000000001",
                         "monitor_type": "bee_informa",
                         "slack_channel": "#roc-notificaciones",
-                        "transaction_unit": "Invoices / Invoice",
+                        "transaction_unit": "Facturas|Factura",
                         "roc_agents": ["agente@empresa.com"],
                         "manage_flags": {"start_active": True, "end_active": True},
-                        "id_scheduler_job": "bee-informa|AEC.001",
+                        "id_scheduler_job": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "job": {
-                            "id": "bee-informa|AEC.001",
+                            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                             "name": "bee-informa | AEC.001",
                             "status": "paused",
                             "trigger_type": "interval",
@@ -401,7 +390,7 @@ class AtomicCreateResponse(BaseModel):
                         },
                     },
                     "job": {
-                        "id": "bee-informa|AEC.001",
+                        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "bee-informa | AEC.001",
                         "status": "paused",
                         "trigger_type": "interval",
