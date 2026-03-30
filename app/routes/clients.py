@@ -18,6 +18,10 @@ router = APIRouter(prefix="/clients", tags=["Clients"])
     response_model=ClientResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Crear cliente",
+    description=(
+        "Crea un nuevo cliente. Los campos `id_freshdesk` e `id_beecker` son únicos en BD. "
+        "El `id` interno se puede omitir — si no se envía se genera un UUID automáticamente."
+    ),
 )
 def create_client(
     payload: ClientCreate,
@@ -56,6 +60,7 @@ def get_client(
     "/{client_id}",
     response_model=ClientResponse,
     summary="Actualizar cliente",
+    description="Actualiza parcialmente un cliente. Sólo se modifican los campos enviados.",
 )
 def update_client(
     client_id: str,

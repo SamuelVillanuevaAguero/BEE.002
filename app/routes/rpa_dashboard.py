@@ -18,16 +18,40 @@ from app.schemas.rpa_dashboard import (
     RPADashboardMonitoringResponse,
     JobLinkRequest,
     BusinessErrorCreate,
-    BusinessErrorResponse,
+    BusinessErrorResponse
 )
 from app.services import rpa_dashboard_service
 from app.utils.auth import verify_api_key
+from app.schemas.rpa_dashboard_full import RPADashboardFullCreate, RPADashboardFullResponse
+from app.services import rpa_dashboard_full_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/rpa-dashboard", tags=["RPA Dashboard"])
 
 
 # ── RPADashboard ──────────────────────────────────────────────────────────────
+@router.post(
+    "/full",
+    response_model=RPADashboardFullResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Crear bot completo (atómico)",
+    description=(
+        "Crea en **una sola transacción** el bot, su configuración de monitoreo "
+        "y opcionalmente el job de APScheduler.\n\n"
+        "**Rollback total** si cualquier paso falla.\n\n"
+        "- `rpa`: datos del bot (id_beecker, id_dashboard, process_name, platform).\n"
+        "- `id_client`: UUID del cliente (debe existir previamente).\n"
+        "- `business_errors`: lista de strings — se guarda como JSON en `rpa_dashboard`.\n"
+        "- `job`: opcional. Si se omite o viene `{}` no se crea job. "
+        "Si se envía, debe tener todos los campos (`name`, `task_path`, `trigger_type`, `trigger_args`)."
+    ),
+)
+def create_rpa_dashboard_full(
+    payload: RPADashboardFullCreate,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key),
+) -> RPADashboardFullResponse:
+    return rpa_dashboard_full_service.create_rpa_dashboard_full(db, payload)
 
 @router.post(
     "/",

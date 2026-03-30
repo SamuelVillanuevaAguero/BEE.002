@@ -115,7 +115,7 @@ class RPAConfig:
     )
 
     # ── Slack channel ───────────────────────────────────────────────────────────
-    channel_name: str = "#agente-monitor-test"
+    channel_name: str = "#agente-monitor-errores"
 
     # ── FreshDesk ───────────────────────────────────────────────────────────────
     freshdesk_client_name: Optional[str] = None
@@ -127,8 +127,8 @@ class RPAConfig:
     enable_chart: bool = True
 
     # ── Beecker credentials ─────────────────────────────────────────────────────
-    email_dash: str = "bee.roc@beecker.ai"
-    password_dash: str = "@Beecker20.26"
+    email_dash: str = "roc@beecker.ai"
+    password_dash: str = "Z^t8)IE:146_"
     platform: str = "cloud"
 
     # ── Third-party credentials (loaded from environment variables) ─────────────
