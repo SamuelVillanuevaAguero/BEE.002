@@ -2,18 +2,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # Database
-    DB_HOST: str = "localhost"
-    DB_PORT: int = 3306
-    DB_USER: str = "root"
+    DB_HOST: str = ""
+    DB_PORT: int = 0
+    DB_USER: str = ""
     DB_PASSWORD: str = ""
-    DB_NAME: str = "scheduler_db"
+    DB_NAME: str = ""
+    DB_SSL_CA: str = ""
 
     # App
-    APP_ENV: str = "development"
-    APP_DEBUG: bool = True
+    APP_ENV: str = ""
+    APP_DEBUG: bool = False
 
     # Scheduler
-    SCHEDULER_TIMEZONE: str = "America/Mexico_City"
+    SCHEDULER_TIMEZONE: str = ""
     SCHEDULER_COALESCE: bool = True
     SCHEDULER_MAX_INSTANCES: int = 3
 
@@ -27,10 +28,13 @@ class Settings(BaseSettings):
 
     @property
     def DATABASE_URL(self) -> str:
-        return (
+        url = (
             f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         )
+        if self.APP_ENV == "production":
+            url += f"?ssl_ca={self.DB_SSL_CA}"
+        return url
 
     @property
     def APSCHEDULER_URL(self) -> str:

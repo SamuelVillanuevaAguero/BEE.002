@@ -35,6 +35,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    profiles: ["dev"] 
+        required: false
+    profiles: [] 
 volumes:
   mysql_data:

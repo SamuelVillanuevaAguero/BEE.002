@@ -8,9 +8,6 @@ from app.schemas.automation import (
     AutomationUpdate
 )
 from app.services import automation_service
-import logging
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/automations", tags=["Automations"])
 
@@ -26,7 +23,7 @@ def create_automation_setting(payload: AutomationCreate, db: Session = Depends(g
     except TypeError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        logger.error(f"Error: {e}")
+        print(e)
         raise HTTPException(status_code=500, detail="Server error")
 
 
@@ -37,7 +34,7 @@ def list_automation_settings(db: Session = Depends(get_db)):
     except HTTPException as http_exception:
         raise http_exception
     except Exception as e:
-        logger.error(f"Error: {e}")
+        print(e)
         raise HTTPException(status_code=500, detail="Server error")
 
 @router.get("/{automation_id}", response_model=AutomationResponse)
@@ -47,7 +44,7 @@ def get_automation_setting(automation_id: str, db: Session = Depends(get_db)):
     except HTTPException as http_exception:
         raise http_exception
     except Exception as e:
-        logger.error(f"Error: {e}")
+        print(e)
         raise HTTPException(status_code=500, detail="Server error")
 
 
@@ -62,7 +59,7 @@ def update_automation_setting(automation_id: str, payload: AutomationUpdate, db:
     except TypeError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        logger.error(f"Error: {e}")
+        print(e)
         raise HTTPException(status_code=500, detail="Server error")
 
 
@@ -73,5 +70,5 @@ def delete_automation_setting(automation_id: str, db: Session = Depends(get_db))
     except HTTPException as http_exception:
         raise http_exception
     except Exception as e:
-        logger.error(f"Error deleting automation setting: {e}")
+        print(f"Error deleting automation setting: {e}")
         raise HTTPException(status_code=500, detail="Server error")

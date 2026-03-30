@@ -32,15 +32,15 @@ from typing import List, Optional
 
 from dotenv import load_dotenv
 
-from .beecker import BeeckerAPI, BeeckerAPIError
-from .freshdesk.freshdesk_api import FreshDeskAPI, FreshDeskAuthenticateError
-from .slack.slack_api import SlackAPI, SlackErrorAuthenticate
+from app.services.beecker import BeeckerAPI, BeeckerAPIError
+from app.services.freshdesk.freshdesk_api import FreshDeskAPI, FreshDeskAuthenticateError
+from app.services.slack.slack_api import SlackAPI, SlackErrorAuthenticate
 from app.services.config.rpa_config import RPAConfig
 from app.services.config.agent_config import AgentConfig
-from .slack_message_builder import RPAMessageBuilder
-from .agent_message_builder import AgentMessageBuilder
-from .chart_builder import RPAChartBuilder, AgentChartBuilder
-from .beecker.beecker_api import RunNotYetAvailableError
+from app.services.slack_message_builder import RPAMessageBuilder
+from app.services.agent_message_builder import AgentMessageBuilder
+from app.services.chart_builder import RPAChartBuilder, AgentChartBuilder
+from app.services.beecker.beecker_api import RunNotYetAvailableError
 
 load_dotenv()
 

@@ -11,9 +11,6 @@ from app.schemas.job import (
     PaginatedExecutions,
 )
 from app.services import job_service
-import logging
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
@@ -30,7 +27,7 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)):
     except TypeError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        logger.error(f"Error: {e}")
+        print(e)
         raise HTTPException(status_code=500, detail="Server error")
 
 
@@ -45,7 +42,7 @@ def list_jobs(
     except HTTPException as http_exception:
         raise http_exception
     except Exception as e:
-        logger.error(f"Error: {e}")
+        print(e)
         raise HTTPException(status_code=500, detail="Server error")
 
 
@@ -60,7 +57,7 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
     except HTTPException as http_exception:
         raise http_exception
     except Exception as e:
-        logger.error(f"Error: {e}")
+        print(e)
         raise HTTPException(status_code=500, detail="Server error")
 
 
@@ -79,7 +76,7 @@ def update_job(job_id: str, payload: JobUpdate, db: Session = Depends(get_db)):
     except TypeError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        logger.error(f"Error: {e}")
+        print(e)
         raise HTTPException(status_code=500, detail="Server error")
 
 
@@ -93,7 +90,7 @@ def delete_job(job_id: str, db: Session = Depends(get_db)):
     except HTTPException as http_exception:
         raise http_exception
     except Exception as e:
-        logger.error(f"Error: {e}")
+        print(e)
         raise HTTPException(status_code=500, detail="Server error")
 
 
@@ -110,7 +107,7 @@ def pause_job(job_id: str, db: Session = Depends(get_db)):
     except HTTPException as http_exception:
         raise http_exception
     except Exception as e:
-        logger.error(f"Error: {e}")
+        print(e)
         raise HTTPException(status_code=500, detail="Server error")
 
 
@@ -125,7 +122,7 @@ def resume_job(job_id: str, db: Session = Depends(get_db)):
     except HTTPException as http_exception:
         raise http_exception
     except Exception as e:
-        logger.error(f"Error: {e}")
+        print(e)
         raise HTTPException(status_code=500, detail="Server error")
 
 
@@ -137,11 +134,11 @@ def trigger_job(job_id: str, db: Session = Depends(get_db)):
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
         job_service.trigger_job_now(job_id)
-        return {"message": f"Job '{job.name}' triggered manually"}
+        return {"message": f"Job '{job.name}' disparado manualmente"}
     except HTTPException as http_exception:
         raise http_exception
     except Exception as e:
-        logger.error(f"Error: {e}")
+        print(e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -163,5 +160,5 @@ def get_job_executions(
     except HTTPException as http_exception:
         raise http_exception
     except Exception as e:
-        logger.error(f"Error: {e}")
+        print(e)
         raise HTTPException(status_code=500, detail="Server error")

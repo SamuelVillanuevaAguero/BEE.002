@@ -6,14 +6,14 @@ from pydantic import BaseModel, Field
 from app.models.automation import MonitorType, PlatformType
 
 
-"""Nested schemas"""
+# ── Nested schemas ─────────────────────────────────────────────────────────────
 
 class MessageFlagsSchema(BaseModel):
     start_active: bool
     end_active: bool
 
 
-"""Base schema (campos compartidos)"""
+# ── Base schema (campos compartidos) ──────────────────────────────────────────
 
 class AutomationBase(BaseModel):
     """Campos compartidos entre Create, Update y Response."""
@@ -38,7 +38,7 @@ class AutomationBase(BaseModel):
     maximum_messages_errors: Optional[int] = Field(None, ge=0, le=10)
     known_issues: Optional[list] = None
 
-"""Automation Schemas"""
+# ── Automation Schemas ─────────────────────────────────────────────────────────
 
 class AutomationCreate(AutomationBase):
     """Payload to create a new automation setting."""

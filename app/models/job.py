@@ -64,18 +64,19 @@ class Job(Base):
 
     next_run_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    rpa_dashboard: Mapped[list["RPADashboardMonitoring"]] = relationship(
-        "RPADashboardMonitoring",
+    rpa_dashboard: Mapped["RPADashboardMonitoring"] = relationship(
         back_populates="job"
     )
 
-    rpa_uipath: Mapped[list["RPAUiPathMonitoring"]] = relationship(
-        "RPAUiPathMonitoring",
+    rpa_uipath: Mapped["RPAUiPathMonitoring"] = relationship(
+        back_populates="job"
+    )
+
+    agent_monitoring: Mapped["AgentMonitoring"] = relationship(
         back_populates="job"
     )
 
     executions: Mapped[list["JobExecution"]] = relationship(
-        "JobExecution",
         back_populates="job",
         cascade="all, delete-orphan"
     )

@@ -97,8 +97,8 @@ class RPAConfig:
     """
 
     # ── Process identification ──────────────────────────────────────────────────
-    bot_name: str = ""
-    id_dashboard: str = ""
+    bot_name: str = ""          # id_beecker visible en Slack  (ej: "AEC.001")
+    id_dashboard: str = ""      # id numérico para la API Beecker (ej: "114")
     process_name: str = ""
 
     # ── Transaction units ───────────────────────────────────────────────────────
@@ -110,23 +110,25 @@ class RPAConfig:
     max_error_groups: Optional[int] = None
 
     # ── Slack mentions (email → ID resolution occurs at load time) ──────────────
-    mention_emails: list[str] = None
+    mention_emails: list[str] = field(
+        default_factory=lambda: ["samuel.villanueva@beecker.ai"]
+    )
 
     # ── Slack channel ───────────────────────────────────────────────────────────
-    channel_name: str = None
+    channel_name: str = "#agente-monitor-test"
 
     # ── FreshDesk ───────────────────────────────────────────────────────────────
     freshdesk_client_name: Optional[str] = None
     freshdesk_status_id: int = 0
 
     # ── Feature flags ───────────────────────────────────────────────────────────
-    enable_overtime_check: bool = False
+    enable_overtime_check: bool = True
     enable_freshdesk_link: bool = True
-    enable_chart: bool = False
+    enable_chart: bool = True
 
     # ── Beecker credentials ─────────────────────────────────────────────────────
-    email_dash: str = os.getenv("BEECKER_EMAIL", "")
-    password_dash: str = os.getenv("BEECKER_PASSWORD", "")
+    email_dash: str = "bee.roc@beecker.ai"
+    password_dash: str = "@Beecker20.26"
     platform: str = "cloud"
 
     # ── Third-party credentials (loaded from environment variables) ─────────────

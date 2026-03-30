@@ -27,9 +27,6 @@ Al activar el job (POST /rpa/execution), activate_observa_job inyecta además ru
 
 import asyncio
 import logging
-from app.db.session import SessionLocal
-from app.services.rpa_orchestration_service import send_rpa_status
-from app.services import job_service
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +48,9 @@ def scheduled_rpa_status(
         monitoring_id: PK del registro en rpa_dashboard_monitoring.
                        Identifica exactamente qué canal/config ejecutar.
     """
+    from app.db.session import SessionLocal
+    from app.services.rpa_orchestration_service import send_rpa_status
+    from app.services import job_service
 
     logger.info(
         f"⏰ [SCHEDULER] Iniciando status | bot_id={bot_id} | "

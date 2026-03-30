@@ -47,7 +47,7 @@ def _load_relations_by_dashboard_id(db: Session, id_dashboard: str) -> list[RPAD
     """
     relations = (
         db.query(RPADashboardMonitoring)
-        .join(RPADashboard, RPADashboardMonitoring.id_beecker == RPADashboard.id_beecker)
+        .join(RPADashboard, RPADashboardMonitoring.id_rpa == RPADashboard.id_beecker)
         .filter(RPADashboard.id_dashboard == id_dashboard)
         .options(joinedload(RPADashboardMonitoring.rpa))
         .all()
@@ -325,6 +325,13 @@ async def _finalize_observa(
 # ── API pública ───────────────────────────────────────────────────────────────
 
 async def handle_execution_start(db: Session, run_id: str, bot_id: str) -> None:
+    """
+    Maneja el inicio de una ejecución RPA (POST /rpa/execution).
+    bot_id = id_dashboard numérico ("104").
+
+    Lanza el flujo de inicio en paralelo para TODOS los registros de monitoring
+    configurados para ese bot.
+    """
     logger.info(f"🐝 [START] id_dashboard={bot_id} | run_id={run_id}")
 
     relations = _load_relations_by_dashboard_id(db, bot_id)
@@ -332,17 +339,10 @@ async def handle_execution_start(db: Session, run_id: str, bot_id: str) -> None:
         f"🔀 [START] {len(relations)} monitoreo(s) encontrado(s) para id_dashboard={bot_id}"
     )
 
-    results = await asyncio.gather(
+    await asyncio.gather(
         *[_handle_start_one(db=db, relation=r, run_id=str(run_id)) for r in relations],
         return_exceptions=True,
     )
-
-    for i, result in enumerate(results):
-        if isinstance(result, Exception):
-            logger.error(
-                f"❌ [START] Error en monitoring #{i} | "
-                f"id_dashboard={bot_id} | run_id={run_id} | {type(result).__name__}: {result}"
-            )
 
 
 async def handle_execution_end(db: Session, run_id: str, bot_id: str) -> None:
@@ -391,7 +391,7 @@ async def send_rpa_status(
         # Fallback: primer registro del bot (compatibilidad con jobs viejos sin monitoring_id)
         relations = (
             db.query(RPADashboardMonitoring)
-            .filter(RPADashboardMonitoring.id_beecker == bot_id)
+            .filter(RPADashboardMonitoring.id_rpa == bot_id)
             .options(joinedload(RPADashboardMonitoring.rpa))
             .all()
         )
