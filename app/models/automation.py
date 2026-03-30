@@ -36,6 +36,8 @@ class Client(Base):
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     client_name: Mapped[str] = mapped_column(String(150), nullable=False, unique=True)
+    id_freshdesk: Mapped[str] = mapped_column(String(15), nullable=False, unique=True)
+    id_beecker: Mapped[str] = mapped_column(String(4), nullable=False, unique=True)
 
     rpa_dashboard: Mapped[list["RPADashboard"]] = relationship(back_populates="client")
     rpa_uipath: Mapped[list["RPAUiPath"]] = relationship(back_populates="client")
