@@ -47,7 +47,7 @@ def _load_relations_by_dashboard_id(db: Session, id_dashboard: str) -> list[RPAD
     """
     relations = (
         db.query(RPADashboardMonitoring)
-        .join(RPADashboard, RPADashboardMonitoring.id_rpa == RPADashboard.id_beecker)
+        .join(RPADashboard, RPADashboardMonitoring.id_beecker == RPADashboard.id_beecker)
         .filter(RPADashboard.id_dashboard == id_dashboard)
         .options(joinedload(RPADashboardMonitoring.rpa))
         .all()
@@ -234,7 +234,7 @@ async def _handle_start_one(
 
     monitoring = MonitoringAgent()
     await monitoring.load_config(config)
-    await monitoring.send_initial_rpa(bot_id=config.id_dashboard)
+    await monitoring.send_initial_rpa(bot_id=config.id_dashboard, run_id=run_id)
     logger.info(
         f"✅ [START] Mensaje de inicio enviado | bot_name={config.bot_name} | "
         f"channel={config.channel_name} | monitoring_id={relation.id}"
@@ -391,7 +391,7 @@ async def send_rpa_status(
         # Fallback: primer registro del bot (compatibilidad con jobs viejos sin monitoring_id)
         relations = (
             db.query(RPADashboardMonitoring)
-            .filter(RPADashboardMonitoring.id_rpa == bot_id)
+            .filter(RPADashboardMonitoring.id_beecker == bot_id)
             .options(joinedload(RPADashboardMonitoring.rpa))
             .all()
         )

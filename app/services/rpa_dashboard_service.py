@@ -47,7 +47,7 @@ def _get_monitoring_or_404(db: Session, id_beecker: str, monitoring_id: str) -> 
         db.query(RPADashboardMonitoring)
         .filter(
             RPADashboardMonitoring.id == monitoring_id,
-            RPADashboardMonitoring.id_rpa == id_beecker,
+            RPADashboardMonitoring.id_beecker == id_beecker,
         )
         .first()
     )
@@ -149,7 +149,7 @@ def create_monitoring(db: Session, id_beecker: str, payload: RPADashboardMonitor
     _get_rpa_or_404(db, id_beecker)
     mon = RPADashboardMonitoring(
         id=str(uuid.uuid4()),
-        id_rpa=id_beecker,
+        id_beecker=id_beecker,
         monitor_type=payload.monitor_type,
         slack_channel=payload.slack_channel,
         transaction_unit=_transaction_unit_str(payload.transaction_unit),
@@ -168,7 +168,7 @@ def list_monitoring(db: Session, id_beecker: str) -> list[RPADashboardMonitoring
     _get_rpa_or_404(db, id_beecker)
     return (
         db.query(RPADashboardMonitoring)
-        .filter(RPADashboardMonitoring.id_rpa == id_beecker)
+        .filter(RPADashboardMonitoring.id_beecker == id_beecker)
         .all()
     )
 
