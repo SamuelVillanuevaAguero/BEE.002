@@ -20,6 +20,13 @@ Error handling:
     - Any exception raised in public methods is reported to CHANNEL_ERROR in Slack.
     - SlackErrorAuthenticate is NOT reported (Slack may not be available).
     - After reporting the error, the exception is always re-raised for the caller.
+
+FreshDesk URL resolution for RPA:
+    Two paths are supported in load_config():
+    1. Fast path (preferred): config.freshdesk_company_id is populated from
+       Client.id_freshdesk in DB — URL is built directly, no API call needed.
+    2. Legacy fallback: config.freshdesk_client_name triggers a FreshDesk API
+       call to resolve the company ID by name (_resolve_freshdesk_url).
 """
 
 from __future__ import annotations
@@ -50,7 +57,7 @@ logger = logging.getLogger(__name__)
 _RPA_IN_PROGRESS_STATES = {"in progress", "pending"}
 
 
-# ── Mensajes de error ─────────────────────────────────────────────────────────
+# ── Error messages ─────────────────────────────────────────────────────────
 
 class _ErrorMessages:
     """Builds error messages sent to the monitoring incident Slack channel."""
@@ -69,15 +76,13 @@ class _ErrorMessages:
 
         lines = [
             "¡Atención equipo!",
-            f"*Se detectó un error en el agente monitor* — `{name_label}`",
-            f"*Hora:* {now}",
+            f"Se ha presentado un error en el monitoreo del bot *{name_label}*.",
+            f"*Timestamp:* {now}",
         ]
         if context:
-            lines += ["", f"*Contexto:* `{context}`"]
+            lines.append(f"*Contexto:* `{context}`")
         if issue:
-            lines += ["", f"*Error:* {issue}"]
-        if traceback_str:
-            lines += ["", f"```{traceback_str[-1500:]}```"]
+            lines.append(f"*Error:* `{issue}`")
 
         return "\n".join(lines)
 
@@ -87,6 +92,9 @@ class _ErrorMessages:
 class MonitoringAgent:
     """
     Main monitoring orchestrator.
+
+    Handles platform authentication, resource resolution (Slack IDs, FreshDesk URLs),
+    and exposes notification methods for RPA bots and Agents.
 
     All public methods are asynchronous and must run inside an event loop.
 
@@ -141,11 +149,17 @@ class MonitoringAgent:
         self._rpa_chart_builder     = RPAChartBuilder()
         self._agent_chart_builder   = AgentChartBuilder()
 
-    # ── Carga de configuración ────────────────────────────────────────────────
+    # ── Configuration loading ────────────────────────────────────────────────
 
     async def load_config(self, config: RPAConfig) -> None:
         """
         Load the RPA configuration and authenticate all required platforms.
+
+        FreshDesk URL resolution:
+            - If config.freshdesk_company_id is set → URL built directly from BD data,
+              no FreshDesk API call needed (fast path).
+            - If config.freshdesk_client_name is set → URL resolved via FreshDesk API
+              by company name (legacy fallback).
 
         Raises:
             ValueError: If required configuration fields are missing.
@@ -157,7 +171,7 @@ class MonitoringAgent:
         config.validate()
         self.__rpa_config = config
 
-        # Slack — singleton, solo autentica la primera vez
+        # Slack — singleton, authenticate only once
         self.__api_slack = await slack_session.get_api(config.token_slack)
         if config.mention_emails:
             self._mention_ids = await self._resolve_mention_ids(config.mention_emails, "RPA")
@@ -167,11 +181,40 @@ class MonitoringAgent:
         await api.login(config.email_dash, config.password_dash)
         self.__api_beecker = api
 
-        # FreshDesk — singleton
+        # FreshDesk — authenticate singleton if credentials exist
         if config.username_freshdesk and config.password_freshdesk:
             self.__api_freshdesk = await freshdesk_session.get_api(
                 config.username_freshdesk, config.password_freshdesk
             )
+
+        # FreshDesk URL resolution for failure messages
+        if config.enable_freshdesk_link and self.__api_freshdesk is not None:
+            if config.freshdesk_company_id:
+                # Fast path: ID disponible en BD — construir URL sin llamada a la API
+                try:
+                    self._freshdesk_url = self.__api_freshdesk.build_freshdesk_ui_url(
+                        company_id=int(config.freshdesk_company_id),
+                        status_id=config.freshdesk_status_id,
+                    )
+                    logger.info(
+                        f"🔗 URL de FreshDesk construida desde BD | "
+                        f"company_id={config.freshdesk_company_id} | "
+                        f"bot={config.bot_name}"
+                    )
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"⚠️ No se pudo construir URL de FreshDesk para "
+                        f"company_id='{config.freshdesk_company_id}': {e}. "
+                        f"El link no se incluirá en los mensajes."
+                    )
+                    self._freshdesk_url = None
+
+            elif config.freshdesk_client_name:
+                # Legacy fallback: resolver por nombre vía API de FreshDesk
+                self._freshdesk_url = await self._resolve_freshdesk_url(
+                    client_name=config.freshdesk_client_name,
+                    status_id=config.freshdesk_status_id,
+                )
 
     async def load_agent_config(self, config: AgentConfig) -> None:
         """
@@ -228,7 +271,7 @@ class MonitoringAgent:
             )
             raise
 
-    # ── Métodos públicos RPA ──────────────────────────────────────────────────
+    # ── Public RPA methods ──────────────────────────────────────────────────
 
     async def send_initial_rpa(self, bot_id: str, run_id: str | None = None) -> None:
         """
@@ -432,7 +475,7 @@ class MonitoringAgent:
             )
             raise
 
-    # ── Métodos públicos Agent ────────────────────────────────────────────────
+    # ── Public Agent methods ────────────────────────────────────────────────
 
     async def send_status_agent(
         self,
@@ -625,6 +668,11 @@ class MonitoringAgent:
         return resolved_ids
 
     async def _resolve_freshdesk_url(self, client_name: str, status_id: int = 0) -> Optional[str]:
+        """
+        Resolves the FreshDesk URL by looking up the company ID from the company name.
+        Legacy fallback — used when freshdesk_company_id is not available in RPAConfig.
+        Prefer the fast path (freshdesk_company_id) when possible.
+        """
         try:
             company_id = await self.__api_freshdesk.get_id_by_name_company(client_name)
             if company_id is None:

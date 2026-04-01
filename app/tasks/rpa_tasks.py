@@ -1,21 +1,21 @@
 """
 app/tasks/rpa_tasks.py
 =======================
-Task genérica para monitoreo RPA, invocada por APScheduler.
+Generic task for RPA monitoring, invoked by APScheduler.
 
-Soporte para múltiples ejecuciones simultáneas (bee-observa):
-    - activate_observa_job agrega cada run_id a job_kwargs["run_ids"].
-    - pause_observa_job remueve run_ids terminados; pausa el job cuando la lista queda vacía.
-    - El job sigue activo mientras haya run_ids pendientes.
+Support for multiple simultaneous executions (bee-observa):
+    - activate_observa_job adds each run_id to job_kwargs["run_ids"].
+    - pause_observa_job removes finished run_ids; pauses the job when the list becomes empty.
+    - The job remains active while there are pending run_ids.
 
-job_kwargs en BD/APScheduler contiene únicamente:
+job_kwargs in DB/APScheduler contains only:
     {
         "bot_id":        "MME.001",
         "monitoring_id": "<uuid>",
-        "run_ids":       ["165834", "165835"]   ← lista canónica; run_id individual eliminado
+        "run_ids":       ["165834", "165835"]   ← canonical list; individual run_id removed
     }
 
-Cómo registrar un job para bee-observa:
+How to register a job for bee-observa:
     POST /jobs/
     {
         "name": "bee-observa | AEC.001 - Canal Aeromexico",
@@ -24,13 +24,13 @@ Cómo registrar un job para bee-observa:
         "trigger_args": { "minutes": 5 },
         "job_kwargs": {
             "bot_id": "AEC.001",
-            "monitoring_id": "<uuid del registro en rpa_dashboard_monitoring>"
+            "monitoring_id": "<uuid of the record in rpa_dashboard_monitoring>"
         }
     }
 
-    Al recibir POST /rpa/execution, activate_observa_job agrega el run_id a run_ids
-    y reanuda el job. Al recibir PUT /rpa/execution, _finalize_observa envía el
-    mensaje de estado final y remueve el run_id de la lista.
+    On POST /rpa/execution, activate_observa_job adds the run_id to run_ids
+    and resumes the job. On PUT /rpa/execution, _finalize_observa sends the
+    final status message and removes the run_id from the list.
 """
 
 import asyncio
@@ -47,27 +47,27 @@ def scheduled_rpa_status(
     bot_id: str,
     run_ids: list[str] | None = None,
     monitoring_id: str | None = None,
-    **kwargs,  # absorbe 'run_id' legacy de jobs que aún lo tengan en memoria APScheduler
+    **kwargs,  # absorbs legacy 'run_id' from jobs still held in APScheduler memory
 ) -> str:
     """
-    Task genérica invocada periódicamente por APScheduler.
+    Generic task invoked periodically by APScheduler.
 
-    Delega completamente a send_rpa_status (rpa_orchestration_service):
-      - Si run_ids tiene elementos → bee_observa: envía UN mensaje fusionado
-        con el estado de todas las ejecuciones activas.
-      - Si run_ids está vacío/None → bee_informa: resuelve el último run_id
-        automáticamente desde Beecker.
+    Delegates entirely to send_rpa_status (rpa_orchestration_service):
+      - If run_ids has elements → bee_observa: sends ONE merged message
+        with the state of all active executions.
+      - If run_ids is empty/None → bee_informa: resolves the latest run_id
+        automatically from Beecker.
 
-    La lógica de pause_observa_job (remover run_ids terminados) la ejecuta
-    _dispatch_status_multi internamente. Esta task no la duplica.
+    The pause_observa_job logic (removing finished run_ids) is executed
+    internally by _dispatch_status_multi. This task does not duplicate it.
 
     Args:
-        job_id:        Inyectado automáticamente por _wrapped_task.
-        bot_id:        id_beecker del bot (ej: "MME.001").
-        run_ids:       Lista de run_ids activos inyectada por activate_observa_job.
-                       None / lista vacía → resolución automática (bee_informa).
-        monitoring_id: PK del registro en rpa_dashboard_monitoring.
-        **kwargs:      Absorbe campos legacy (ej: run_id) sin romper la task.
+        job_id:        Injected automatically by _wrapped_task.
+        bot_id:        id_beecker of the bot (e.g. "MME.001").
+        run_ids:       List of active run_ids injected by activate_observa_job.
+                       None / empty list → automatic resolution (bee_informa).
+        monitoring_id: PK of the record in rpa_dashboard_monitoring.
+        **kwargs:      Absorbs legacy fields (e.g. run_id) without breaking the task.
     """
     if kwargs:
         logger.debug(

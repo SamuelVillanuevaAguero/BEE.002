@@ -238,7 +238,7 @@ class AgentMessageBuilder:
         Returns:
             Slack message formatted in mrkdwn.
         """
-        # ── Normalizar el set de estados fallidos ──────────────────────────────
+        # ── Normalize the failed state set ───────────────────────────────────
         failed_states_set: Set[str] = {
             s.lower().strip()
             for s in (failed_states if failed_states is not None else DEFAULT_FAILED_STATES)
@@ -252,20 +252,20 @@ class AgentMessageBuilder:
         unit   = execution_unit
         unit_s = execution_unit_singular
 
-        # Filtrar ejecuciones fallidas usando la lista configurable
+        # Filter failed executions using the configurable list
         failed_executions = [
             ex for ex in executions
             if (ex.get("run_state") or "").lower().strip() in failed_states_set
         ]
-        # El conteo correcto viene de la lista filtrada, no del dict del API
-        # (el API solo cuenta el estado literal "failed").
+        # The correct count comes from the filtered list, not the API dict
+        # (the API only counts the literal "failed" state).
         failed_count = len(failed_executions)
 
         total_u = unit_s if total == 1 else unit
 
         lines: List[str] = []
 
-        # ── 1. Encabezado ──────────────────────────────────────────────────────
+        # ── 1. Header ────────────────────────────────────────────────────────
         lines.append(_GREETING_PROVIDER.get())
         lines.append(
             f"Resumen del agente `{agent_name.upper()}` *→ {process_name}*"
@@ -275,7 +275,7 @@ class AgentMessageBuilder:
         )
         lines.append("")
 
-        # ── 2. Conteo de estados ───────────────────────────────────────────────
+        # ── 2. State counts ─────────────────────────────────────────────────
         lines.append(
             f"*Aún sin procesar {unit_s}*"
             if total == 0
@@ -284,7 +284,7 @@ class AgentMessageBuilder:
             else f"*Estado de las {unit} ({total} {total_u} procesados):*"
         )
 
-        # Estados conocidos con etiqueta en español (orden de presentación)
+        # Known states with Spanish labels (display order)
         _KNOWN_STATES: List[tuple] = [
             ("completed",        "Completadas"),
             ("successful",       "Exitosas"),
@@ -296,31 +296,31 @@ class AgentMessageBuilder:
         ]
         _KNOWN_STATE_KEYS = {s for s, _ in _KNOWN_STATES}
 
-        # Contar todas las ejecuciones agrupadas por su run_state real
+        # Count all executions grouped by their actual run_state
         dynamic_counts: Dict[str, int] = {}
         for ex in executions:
             raw_state = (ex.get("run_state") or "unknown").strip()
             key = raw_state.lower()
             dynamic_counts[key] = dynamic_counts.get(key, 0) + 1
 
-        # Estados de error configurados → agrupar todos bajo la etiqueta "Fallidas"
-        # para evitar mostrar cada estado de error por separado.
+        # Configured error states → group all under the "Failed" label
+        # to avoid showing each error state separately.
         combined_failed_count = sum(
             dynamic_counts.get(s, 0) for s in failed_states_set
         )
 
-        # Mostrar primero los estados conocidos NO fallidos (en el orden definido)
+        # Show known non-failed states first (in defined order)
         already_shown: Set[str] = set()
         for state_key, label in _KNOWN_STATES:
             if state_key in failed_states_set:
-                continue   # Los fallidos se muestran juntos al final
+                continue   # Failed states are shown together at the end
             count = dynamic_counts.get(state_key, 0)
             if count > 0:
                 count_u = unit_s if count == 1 else unit
                 lines.append(f"➤ *{label}:* {count} {count_u} {_state_emoji(state_key)}")
                 already_shown.add(state_key)
 
-        # Mostrar dinámicamente los estados no contemplados que tampoco son fallidos
+        # Dynamically show unexpected states that are also not failed
         for raw_key, count in dynamic_counts.items():
             if raw_key in _KNOWN_STATE_KEYS or raw_key in failed_states_set:
                 continue
@@ -328,14 +328,14 @@ class AgentMessageBuilder:
             count_u = unit_s if count == 1 else unit
             lines.append(f"➤ *{display_label}:* {count} {count_u} {_state_emoji(raw_key)}")
 
-        # Mostrar bloque unificado de fallidas (si existen)
+        # Show a unified failed block (if any)
         if combined_failed_count > 0:
             count_u = unit_s if combined_failed_count == 1 else unit
             lines.append(f"➤ *Fallidas:* {combined_failed_count} {count_u} {_state_emoji('failed')}")
 
         lines.append("")
 
-        # ── 3. Listado de ejecuciones fallidas ────────────────────────────────
+        # ── 3. Failed executions list ────────────────────────────────────────
         if show_error_list and failed_executions:
             failed_u = unit_s if failed_count == 1 else unit
             lines.append(
@@ -350,7 +350,7 @@ class AgentMessageBuilder:
 
             lines.append("")
 
-        # ── 4. Categorías de error ─────────────────────────────────────────────
+        # ── 4. Error categories ──────────────────────────────────────────────
         if show_error_categories and failed_executions:
             error_groups = _group_errors_by_description(
                 failed_executions=failed_executions,
@@ -386,7 +386,7 @@ class AgentMessageBuilder:
             lines.append(f"```{block_content}```")
             lines.append("")
 
-        # ── 5. Menciones (solo si hay fallos) ─────────────────────────────────
+        # ── 5. Mentions (only if there are failures) ─────────────────────────
         if failed_count > 0 and mention_user_ids:
             mentions = " ".join(f"<@{uid}>" for uid in mention_user_ids)
             lines.append(
@@ -394,17 +394,17 @@ class AgentMessageBuilder:
             )
             lines.append("")
 
-        # ── 6. Enlace de FreshDesk (solo si hay fallos) ───────────────────────
+        # ── 6. FreshDesk link (only if there are failures) ───────────────────
         if failed_count > 0 and freshdesk_url:
             lines.append(f"Tickets generados <{freshdesk_url}|FreshDesk>")
             lines.append("")
 
-        # ── 7. Advertencias de la API (si existen) ────────────────────────────
+        # ── 7. API warnings (if any) ────────────────────────────────────────
         warnings = agent_status.get("warnings", [])
         if warnings:
             lines.append(f"_⚠️ {len(warnings)} advertencia(s) al obtener los datos._")
 
-        # Limpiar líneas vacías finales
+        # Trim trailing empty lines
         while lines and lines[-1] == "":
             lines.pop()
 

@@ -60,12 +60,12 @@ class BeeckerAPIError(Exception):
     do not depend on the internal implementation details of each platform.
     """
 
-# ── Excepción nueva — agregar junto a BeeckerAPIError ─────────────────────────
+# ── New exception — add alongside BeeckerAPIError ─────────────────────────
 
 class RunNotYetAvailableError(Exception):
     """
-    Se lanza cuando el run_id aún no aparece en el historial de Beecker.
-    Indica que la ejecución terminó pero Beecker todavía no la registró.
+    Raised when the run_id has not yet appeared in Beecker history.
+    Indicates the execution finished but Beecker has not recorded it yet.
     """
     def __init__(self, run_id: int, bot_id: str):
         self.run_id = run_id
@@ -916,10 +916,10 @@ class BeeckerAPI:
     ) -> Dict[str, Any]:
         """
         Devuelve un snapshot completo del estado de una ejecución RPA.
-
+ 
         Combina historial + transacciones para producir un dict compatible
         con RPAMessageBuilder.build().
-
+ 
         Args:
             run_id:                      ID numérico de la ejecución en Beecker.
             bot_id:                      ID del bot (id_beecker, ej. "aec.002").
@@ -928,7 +928,7 @@ class BeeckerAPI:
             status_field:                Campo de estado en transacciones.
             details_field:               Campo de detalle/error en transacciones.
             failed_value:                Valor que indica fallo en status_field.
-
+ 
         Returns:
             {
                 "run_id":                      int,
@@ -956,14 +956,19 @@ class BeeckerAPI:
             end_run   = run_info.get("end_run")
             run_state = run_info.get("run_state", "unknown")
             details   = run_info.get("details")
-
-            # ── 2. Tiempo transcurrido ─────────────────────────────────────────
+ 
+            # ── 2. Tiempo transcurrido ────────────────────────────────────────
             elapsed_minutes = self._compute_elapsed_minutes(
                 start_run=start_run,
                 end_run=end_run,
             )
-
-            # ── 3. Transacciones ───────────────────────────────────────────────
+ 
+            # ── 3. Transacciones ──────────────────────────────────────────────
+            # Se consultan siempre, incluyendo cuando run_state = "failed":
+            # algunos bots registran transacciones parciales antes de fallar,
+            # lo que permite mostrar grupos de error en el mensaje de Slack.
+            # Si la API devuelve 404 significa que no hay transacciones y se
+            # continúa con los valores por defecto (totales en cero).
             trans_stats: Dict[str, Any] = {
                 "count_data":           0,
                 "complete_count":       0,
@@ -972,35 +977,38 @@ class BeeckerAPI:
                 "failed_percentage":    0.0,
             }
             all_transactions: List[Dict] = []
-
-            if run_state.lower() != "failed":
-                try:
-                    raw              = await self.get_all_transactions(run_id=run_id)
-                    all_transactions = raw.get("transactions", [])
-                    stats            = raw.get("statistics", {})
-                    trans_stats = {
-                        "count_data":           stats.get("count_data", len(all_transactions)),
-                        "complete_count":       stats.get("complete_count", 0),
-                        "failed_count":         stats.get("failed_count", 0),
-                        "completed_percentage": stats.get("completed_percentage", 0.0),
-                        "failed_percentage":    stats.get("failed_percentage", 0.0),
-                    }
-                except BeeckerAPIError as e:
-                    if "404" not in str(e):
-                        raise
-
+ 
+            try:
+                raw              = await self.get_all_transactions(run_id=run_id)
+                all_transactions = raw.get("transactions", [])
+                stats            = raw.get("statistics", {})
+                trans_stats = {
+                    "count_data":           stats.get("count_data", len(all_transactions)),
+                    "complete_count":       stats.get("complete_count", 0),
+                    "failed_count":         stats.get("failed_count", 0),
+                    "completed_percentage": stats.get("completed_percentage", 0.0),
+                    "failed_percentage":    stats.get("failed_percentage", 0.0),
+                }
+            except BeeckerAPIError as e:
+                if "404" not in str(e):
+                    raise
+                logger.info(
+                    f"ℹ️ Sin transacciones para run_id={run_id} "
+                    f"(run_state='{run_state}'). Se continúa con totales en cero."
+                )
+ 
             total_transactions     = trans_stats["count_data"] or 0
             completed_transactions = trans_stats["complete_count"] or 0
             failed_transactions    = trans_stats["failed_count"] or 0
             completion_pct         = trans_stats["completed_percentage"] or 0.0
             failed_pct             = trans_stats["failed_percentage"] or 0.0
-
-            # ── 4. Promedio real de esta ejecución ─────────────────────────────
+ 
+            # ── 4. Promedio real de esta ejecución ────────────────────────────
             avg_current = 0.0
             if total_transactions > 0 and elapsed_minutes > 0:
                 avg_current = round(elapsed_minutes / total_transactions, 4)
-
-            # ── 5. Referencia histórica (excluyendo run_id actual) ─────────────
+ 
+            # ── 5. Referencia histórica (excluyendo run_id actual) ────────────
             reference_avg: Optional[float] = avg_minutes_per_transaction
             if reference_avg is None:
                 try:
@@ -1014,14 +1022,14 @@ class BeeckerAPI:
                     reference_avg = ref if ref > 0 else None
                 except BeeckerAPIError:
                     reference_avg = None
-
-            # ── 6. Bandera de overtime ─────────────────────────────────────────
+ 
+            # ── 6. Bandera de overtime ────────────────────────────────────────
             overtime_flag: Optional[bool] = None
             if reference_avg is not None and total_transactions > 0 and elapsed_minutes > 0:
                 expected      = reference_avg * total_transactions
                 overtime_flag = elapsed_minutes > expected
-
-            # ── 7. Agrupación de errores ───────────────────────────────────────
+ 
+            # ── 7. Agrupación de errores ──────────────────────────────────────
             error_groups = self._group_errors(
                 transactions=all_transactions,
                 status_field=status_field,
@@ -1029,7 +1037,7 @@ class BeeckerAPI:
                 failed_value=failed_value,
                 threshold=similarity_threshold,
             )
-
+ 
             return {
                 "run_id":                      run_id,
                 "bot_id":                      bot_id,
@@ -1048,14 +1056,14 @@ class BeeckerAPI:
                 "overtime_flag":               overtime_flag,
                 "error_groups":                error_groups,
             }
-
+ 
         except BeeckerAPIError:
             raise
-        except RunNotYetAvailableError:   # ← agregar ANTES del except genérico
+        except RunNotYetAvailableError:
             raise
         except Exception as e:
             raise BeeckerAPIError(f"Error al obtener status de run_id={run_id}: {e}")
-
+        
     async def _find_run_in_history(self, bot_id: str, run_id: int, max_pages: int = 10) -> Dict[str, Any]:
             run_id_str = str(run_id)
             logger.info(f"🔍 Buscando run_id={run_id_str} en historial de bot_id='{bot_id}'")

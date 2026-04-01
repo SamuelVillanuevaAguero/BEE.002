@@ -222,10 +222,10 @@ class _BaseMessageBuilder:
         details = []
         if failed > 0:
             unit_f = unit_singular if failed == 1 else unit_plural
-            details.append(f"*➤ {failed} {unit_f}* `failed` ")
+            details.append(f"➤ {failed} {unit_f} `failed`")
         if pending > 0:
             unit_p = unit_singular if pending == 1 else unit_plural
-            details.append(f"*➤ {pending} {unit_p}* `new` ")
+            details.append(f"➤ {pending} {unit_p} `new`")
         if details:
             lines.append(f"{'\n'.join(details)}")
 
@@ -239,17 +239,25 @@ class _BaseMessageBuilder:
         show: bool = True,
         max_groups: Optional[int] = None,
     ) -> list[str]:
-        """Generate the error groups section lines."""
+        """
+        Generate the error groups section lines.
+
+        Supports both key conventions returned by _group_errors in beecker_api.py:
+            - "representative": key used by BeeckerAPI._group_errors()
+            - "description":    legacy key for backwards compatibility
+        """
         if not show or not error_groups:
             return []
 
         groups = error_groups[:max_groups] if max_groups else error_groups
         lines = ["*Grupos de error:*"]
         for g in groups:
-            desc  = g.get("description", "Sin descripción")
+            # "representative" is the key produced by BeeckerAPI._group_errors().
+            # Keep fallback to "description" for compatibility with external code.
+            desc  = g.get("representative", g.get("description", "Sin descripción"))
             count = g.get("count", 0)
             unit  = unit_singular if count == 1 else unit_plural
-            lines.append(f"  • `{desc}` — {count} {unit}")
+            lines.append(f"```➤ {desc} — {count} {unit} ```")
         return lines
 
     @staticmethod
@@ -293,7 +301,7 @@ class HappyPathBuilder(_BaseMessageBuilder):
 
         if pending > 0:
             unit_p = ctx.transaction_unit_singular if pending == 1 else ctx.transaction_unit
-            lines.append(f"*➤ {pending} {unit_p}* `new` ")
+            lines.append(f"➤ {pending} {unit_p} `new`")
 
         lines.append("Sin errores reportados.")
         lines.append(self._timing_info(ctx.status))
@@ -335,7 +343,13 @@ class PartialFailureBuilder(_BaseMessageBuilder):
 
 
 class CriticalFailureBuilder(_BaseMessageBuilder):
-    """Build message for executions that fail completely (run_state = failed)."""
+    """
+    Build message for executions that fail completely (run_state = failed).
+
+    Si la ejecución registró transacciones parciales antes de fallar,
+    se incluye el resumen de transacciones y los grupos de error
+    (respetando la flag show_error_groups del MessageContext).
+    """
 
     def build(self, ctx: MessageContext) -> str:
         status = ctx.status
@@ -360,6 +374,15 @@ class CriticalFailureBuilder(_BaseMessageBuilder):
             lines.append(f"```{run_details}```")
             lines.append("")
 
+        # Mostrar resumen de transacciones si el bot procesó algo antes de fallar
+        total_transactions = status.get("total_transactions", 0)
+        if total_transactions > 0:
+            lines.extend([
+                *self._transaction_summary(status, unit, ctx.transaction_unit_singular),
+                "",
+            ])
+
+        # Mostrar grupos de error si los hay (respetando la flag show_error_groups)
         error_section = self._error_groups_section(
             status.get("error_groups", []),
             unit,
@@ -435,7 +458,7 @@ class _InitialMessageBuilder(_BaseMessageBuilder):
     """Builder responsible for execution start notifications."""
 
     def build(self, ctx: MessageContext) -> str:
-        # Incluir #run_id en el mensaje si está disponible en ctx.status
+        # Include #run_id in the message if available in ctx.status
         run_id = ctx.status.get("run_id") if ctx.status else None
         run_id_tag = f" `#{run_id}`" if run_id else ""
 
@@ -446,7 +469,7 @@ class _InitialMessageBuilder(_BaseMessageBuilder):
         return "\n".join(lines)
 
 
-# ── Registry y builder principal ──────────────────────────────────────────────
+# ── Registry and main builder ──────────────────────────────────────────────
 
 _BUILDER_REGISTRY: dict[ExecutionScenario, _BaseMessageBuilder] = {
     ExecutionScenario.HAPPY_PATH:       HappyPathBuilder(),
@@ -455,7 +478,7 @@ _BUILDER_REGISTRY: dict[ExecutionScenario, _BaseMessageBuilder] = {
     ExecutionScenario.OVERTIME:         OvertimeBuilder(),
 }
 
-_INITIAL_BUILDER  = _InitialMessageBuilder()
+_INITIAL_BUILDER = _InitialMessageBuilder()
 
 
 class RPAMessageBuilder:

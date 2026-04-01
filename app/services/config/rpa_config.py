@@ -12,6 +12,12 @@ New field — id_dashboard:
     ID numérico de plataforma (ej: "114") usado para hacer peticiones a la API
     de Beecker. Se diferencia de bot_name (id_beecker = "AEC.001") que es el
     identificador visible para el equipo ROC y en los mensajes de Slack.
+
+New field — freshdesk_company_id:
+    ID numérico de la empresa en FreshDesk (Client.id_freshdesk en BD).
+    Cuando se provee, la URL de FreshDesk se construye directamente sin
+    realizar ninguna llamada a la API de FreshDesk. Tiene precedencia
+    sobre freshdesk_client_name.
 """
 
 from __future__ import annotations
@@ -61,8 +67,14 @@ class RPAConfig:
         Slack channel where notifications will be sent.
 
     freshdesk_client_name:
-        Client name in FreshDesk. Used to build the FreshDesk ticket link.
-        If None and enable_freshdesk_link is True, the link will not be included.
+        Client name in FreshDesk. Used to build the FreshDesk ticket link
+        via an API call (legacy fallback). Ignored when freshdesk_company_id
+        is provided.
+
+    freshdesk_company_id:
+        Numeric FreshDesk company ID (from Client.id_freshdesk in DB).
+        When provided, the FreshDesk URL is built directly without any API
+        call to FreshDesk. Takes precedence over freshdesk_client_name.
 
     freshdesk_status_id:
         Ticket status ID used when filtering FreshDesk tickets (default: 0).
@@ -97,8 +109,8 @@ class RPAConfig:
     """
 
     # ── Process identification ──────────────────────────────────────────────────
-    bot_name: str = ""
-    id_dashboard: str = ""
+    bot_name: str = ""          # id_beecker visible en Slack  (ej: "AEC.001")
+    id_dashboard: str = ""      # id numérico para la API Beecker (ej: "114")
     process_name: str = ""
 
     # ── Transaction units ───────────────────────────────────────────────────────
@@ -117,6 +129,7 @@ class RPAConfig:
 
     # ── FreshDesk ───────────────────────────────────────────────────────────────
     freshdesk_client_name: Optional[str] = None
+    freshdesk_company_id: Optional[str] = None   # ID numérico desde Client.id_freshdesk en BD
     freshdesk_status_id: int = 0
 
     # ── Feature flags ───────────────────────────────────────────────────────────
@@ -173,5 +186,6 @@ class RPAConfig:
 
         if errors:
             raise ValueError(
-                "Configuración inválida:\n" + "\n".join(f"  · {e}" for e in errors)
+                "Configuración de RPA inválida:\n"
+                + "\n".join(f"  · {e}" for e in errors)
             )

@@ -81,11 +81,11 @@ class BeeckerSessionManager:
         self._init_state()
 
         async with self._lock:
-            # ── Caso 1: sesión válida ─────────────────────────────────────────
+            # ── Case 1: valid session ─────────────────────────────────────────
             if self._is_valid():
                 return self._access_token  # type: ignore[return-value]
 
-            # ── Caso 2: tenemos refresh token y el acceso está por expirar ────
+            # ── Case 2: refresh token available and access is about to expire ────
             if self._refresh_token:
                 try:
                     await self._do_refresh(http_client, refresh_url)
@@ -96,7 +96,7 @@ class BeeckerSessionManager:
                         f"⚠️ [BeeckerSession] Refresh falló ({e}), haciendo login completo."
                     )
 
-            # ── Caso 3: primer login o refresh fallido ────────────────────────
+            # ── Case 3: first login or failed refresh ────────────────────────
             await self._do_login(email, password, http_client, login_url)
             logger.info("🔐 [BeeckerSession] Login exitoso. Sesión activa por ~4h.")
             return self._access_token  # type: ignore[return-value]

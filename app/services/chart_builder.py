@@ -41,21 +41,21 @@ import matplotlib.patches as mpatches
 from matplotlib.gridspec import GridSpec
 
 _PALETTE = {
-    "completed":         "#2ECC71",   # verde
+    "completed":         "#2ECC71",   # green
     "successful":        "#2ECC71",
-    "failed":            "#E74C3C",   # rojo
+    "failed":            "#E74C3C",   # red
     "documents missing": "#E74C3C",
-    "in progress":       "#3498DB",   # azul
-    "pending":           "#95A5A6",   # gris
-    "in review":         "#F39C12",   # naranja
-    "pending approval":  "#9B59B6",   # morado
-    "overtime":          "#E67E22",   # naranja oscuro
-    "default":           "#BDC3C7",   # gris claro
+    "in progress":       "#3498DB",   # blue
+    "pending":           "#95A5A6",   # gray
+    "in review":         "#F39C12",   # orange
+    "pending approval":  "#9B59B6",   # purple
+    "overtime":          "#E67E22",   # dark orange
+    "default":           "#BDC3C7",   # light gray
 }
 
-_BG_COLOR    = "#1C1C1E"   # fondo oscuro
-_TEXT_COLOR  = "#ECECEC"   # texto principal
-_GRID_COLOR  = "#2C2C2E"   # líneas de cuadrícula
+_BG_COLOR    = "#1C1C1E"   # dark background
+_TEXT_COLOR  = "#ECECEC"   # main text
+_GRID_COLOR  = "#2C2C2E"   # grid lines
 
 
 def _state_color(state: str) -> str:
@@ -80,10 +80,10 @@ class RPAChartBuilder:
     "in progress" or "pending".
     """
 
-    # Estados que se consideran "en curso" → no generar gráfica
+    # States considered "in progress" → do not generate a chart
     _IN_PROGRESS_STATES = {"in progress", "pending"}
 
-    # Emoji por estado para el título
+    # Emoji per state for the title
     _STATE_EMOJI = {
         "completed": "✅",
         "failed":    "❌",
@@ -152,7 +152,7 @@ class RPAChartBuilder:
             ax_donut = fig.add_subplot(gs[0])
             ax_time  = None
 
-        # ── Título principal ──────────────────────────────────────────────────
+        # ── Main title ──────────────────────────────────────────────────────
         state_emoji = self._STATE_EMOJI.get(run_state, "🔹")
         overtime_tag = "  ⏰ Overtime" if overtime_flag else ""
         fig.suptitle(
@@ -160,14 +160,14 @@ class RPAChartBuilder:
             color=_TEXT_COLOR, fontsize=13, fontweight="bold", y=1.02,
         )
 
-        # ── Gráfica de dona ───────────────────────────────────────────────────
+        # ── Donut chart ─────────────────────────────────────────────────────
         self._draw_donut(ax_donut, completed, failed, total)
 
-        # ── Barra de tiempo ───────────────────────────────────────────────────
+        # ── Time bar ─────────────────────────────────────────────────────────
         if ax_time is not None:
             self._draw_time_bar(ax_time, avg_minutes, real_minutes, overtime_flag)
 
-        # ── Subtítulo con fechas ──────────────────────────────────────────────
+        # ── Subtitle with dates ─────────────────────────────────────────────
         fig.text(
             0.5, -0.02,
             f"Inicio: {start_run}   →   Fin: {end_run}",
@@ -187,7 +187,7 @@ class RPAChartBuilder:
         ax.set_facecolor(_BG_COLOR)
 
         if total == 0:
-            # Sin datos: dona vacía con mensaje
+            # No data: empty donut chart with message
             ax.pie([1], colors=["#2C2C2E"], startangle=90,
                    wedgeprops={"width": 0.5})
             ax.text(0, 0, "Sin datos", ha="center", va="center",
@@ -212,7 +212,7 @@ class RPAChartBuilder:
         ax.text(0, -0.2, "completadas", ha="center", va="center",
                 color="#888888", fontsize=8)
 
-        # Leyenda manual debajo de la dona
+        # Manual legend below the donut
         legend_items = [
             mpatches.Patch(color=_PALETTE["completed"],
                            label=f"Completadas:  {completed:,}"),
@@ -278,7 +278,7 @@ class AgentChartBuilder:
     for an agent within the selected interval.
     """
 
-    # Orden preferido de presentación y etiquetas en español
+    # Preferred display order and labels in Spanish
     _KNOWN_STATES: List[Tuple[str, str]] = [
         ("completed",        "Completadas"),
         ("successful",       "Exitosas"),
@@ -317,13 +317,13 @@ class AgentChartBuilder:
         interval_start = agent_status.get("interval_start", "N/D")
         interval_end   = agent_status.get("interval_end",   "N/D")
 
-        # ── Agrupar conteos por estado ─────────────────────────────────────────
+        # ── Group counts by state ─────────────────────────────────────────────
         raw_counts: Dict[str, int] = {}
         for ex in executions:
             state = (ex.get("run_state") or "unknown").lower().strip()
             raw_counts[state] = raw_counts.get(state, 0) + 1
 
-        # Ordenar: primero los estados conocidos (en el orden definido), luego los desconocidos
+        # Sort: first known states (in defined order), then unknown states
         ordered_labels  = []
         ordered_counts  = []
         ordered_colors  = []
@@ -346,7 +346,7 @@ class AgentChartBuilder:
         n_bars = len(ordered_labels)
 
         if n_bars == 0:
-            # Sin datos
+            # No data
             fig, ax = plt.subplots(figsize=(8, 3), facecolor=_BG_COLOR)
             ax.set_facecolor(_BG_COLOR)
             ax.text(0.5, 0.5, "Sin ejecuciones en el intervalo",
@@ -362,7 +362,7 @@ class AgentChartBuilder:
         ax.set_facecolor(_BG_COLOR)
 
         # ── Barras horizontales ────────────────────────────────────────────────
-        y_pos = list(range(n_bars - 1, -1, -1))   # de arriba hacia abajo
+        y_pos = list(range(n_bars - 1, -1, -1))   # top to bottom
         bars  = ax.barh(
             y_pos, ordered_counts,
             color=ordered_colors,
@@ -372,7 +372,7 @@ class AgentChartBuilder:
 
         max_count = max(ordered_counts) if ordered_counts else 1
 
-        # Etiquetas numéricas al final de cada barra
+        # Numeric labels at the end of each bar
         for bar, count in zip(bars, ordered_counts):
             ax.text(
                 bar.get_width() + max_count * 0.015,
@@ -381,21 +381,21 @@ class AgentChartBuilder:
                 va="center", color=_TEXT_COLOR, fontsize=9, fontweight="bold",
             )
 
-        # Etiquetas del eje Y
+        # Y-axis labels
         ax.set_yticks(y_pos)
         ax.set_yticklabels(ordered_labels, color=_TEXT_COLOR, fontsize=9)
 
-        # Quitar bordes innecesarios
+        # Remove unnecessary borders
         for spine in ["top", "right", "bottom"]:
             ax.spines[spine].set_visible(False)
         ax.spines["left"].set_edgecolor(_GRID_COLOR)
 
         ax.tick_params(axis="x", colors=_GRID_COLOR, labelsize=0,
-                       length=0)   # ocultar ticks y labels del eje X
+                       length=0)   # hide X-axis ticks and labels
         ax.set_xlim(0, max_count * 1.18)
         ax.xaxis.set_visible(False)
 
-        # ── Título y subtítulo ─────────────────────────────────────────────────
+        # ── Title and subtitle ───────────────────────────────────────────────
         fig.suptitle(
             agent_name,
             color=_TEXT_COLOR, fontsize=12, fontweight="bold", y=1.02,
@@ -405,7 +405,7 @@ class AgentChartBuilder:
             color="#888888", fontsize=8, pad=8,
         )
 
-        # ── Nota de total ─────────────────────────────────────────────────────
+        # ── Total note ───────────────────────────────────────────────────────
         fig.text(
             0.5, -0.03,
             f"Total: {total} ejecuciones",

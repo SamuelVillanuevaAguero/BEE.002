@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 
 def get_or_create_client(db: Session, client_id: str | None, client_name: str | None) -> Client:
     """
-    Lógica del fragmento client en el payload atómico:
-      - Si client_id tiene valor → buscar y retornar ese cliente (404 si no existe)
-      - Si client_id es None/vacío → crear nuevo cliente con client_name
+    Logic for the client fragment in the atomic payload:
+      - If client_id has a value → look up and return that client (404 if missing)
+      - If client_id is None/empty → create a new client with client_name
     """
     cid = client_id.strip() if client_id and client_id.strip() else None
 
@@ -108,7 +108,7 @@ def delete_client(db: Session, client_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _handle_integrity_error(exc: IntegrityError) -> None:
-    """Traduce errores de unicidad a respuestas HTTP legibles."""
+    """Translate uniqueness errors into human-readable HTTP responses."""
     msg = str(exc.orig).lower() if exc.orig else ""
     if "id_freshdesk" in msg:
         raise HTTPException(

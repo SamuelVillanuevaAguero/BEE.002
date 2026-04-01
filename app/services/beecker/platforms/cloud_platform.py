@@ -375,7 +375,7 @@ class CloudPlatform(BasePlatform):
         }
 
     # ------------------------------------------------------------------
-    # Agent — Progreso de ejecución
+    # Agent — Execution progress
     # ------------------------------------------------------------------
 
     async def get_agent_progress(

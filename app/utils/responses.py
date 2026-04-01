@@ -1,13 +1,13 @@
 """
 app/utils/responses.py
 ======================
-Módulo central de respuestas OpenAPI reutilizables para todos los routers.
+Core module of reusable OpenAPI responses for all routers.
 
-IMPORTANTE: Swagger muestra "string" cuando un código de respuesta tiene solo
-"description" pero no "content" con "schema". Ambos campos son obligatorios
-para que Swagger renderice el ejemplo correctamente.
+IMPORTANT: Swagger shows "string" when a response code has only
+"description" but no "content" with "schema". Both fields are required
+for Swagger to render the example correctly.
 
-Uso:
+Usage:
     from app.utils.responses import R200, R201, R202, R204, R401, R404, R422, R500, COMMON
 
     @router.post("/", responses={**R201, **COMMON})
@@ -45,7 +45,7 @@ _VALIDATION_SCHEMA = {
 }
 
 
-# ── Códigos de error ──────────────────────────────────────────────────────────
+# ── Error codes ─────────────────────────────────────────────────────────────
 
 R401: dict[int, Any] = {
     401: {
@@ -103,21 +103,21 @@ R500: dict[int, Any] = {
     }
 }
 
-# Sin contenido (DELETE exitoso)
+# No content (successful DELETE)
 R204: dict[int, Any] = {
     204: {
         "description": "Eliminado exitosamente (sin contenido)",
     }
 }
 
-# Agrupaciones comunes
+# Common groupings
 COMMON: dict[int, Any] = {**R401, **R422, **R500}
 
 
-# ── Helpers para códigos de éxito con ejemplo inline ─────────────────────────
+# ── Helpers for success status codes with inline example ───────────────────
 
 def R200(example: Any, description: str = "OK") -> dict[int, Any]:
-    """Respuesta 200 con ejemplo de objeto."""
+    """200 response with example object."""
     return {
         200: {
             "description": description,
@@ -132,7 +132,7 @@ def R200(example: Any, description: str = "OK") -> dict[int, Any]:
 
 
 def R200_list(example: list[Any], description: str = "OK") -> dict[int, Any]:
-    """Respuesta 200 con ejemplo de lista."""
+    """200 response with example list."""
     return {
         200: {
             "description": description,
@@ -147,7 +147,7 @@ def R200_list(example: list[Any], description: str = "OK") -> dict[int, Any]:
 
 
 def R200_str_list(example: list[str], description: str = "OK") -> dict[int, Any]:
-    """Respuesta 200 con ejemplo de lista de strings."""
+    """200 response with example list of strings."""
     return {
         200: {
             "description": description,
@@ -161,8 +161,8 @@ def R200_str_list(example: list[str], description: str = "OK") -> dict[int, Any]
     }
 
 
-def R201(example: Any, description: str = "Creado exitosamente") -> dict[int, Any]:
-    """Respuesta 201 con ejemplo."""
+def R201(example: Any, description: str = "Created successfully") -> dict[int, Any]:
+    """201 response with example."""
     return {
         201: {
             "description": description,
@@ -176,8 +176,8 @@ def R201(example: Any, description: str = "Creado exitosamente") -> dict[int, An
     }
 
 
-def R202(example: Any, description: str = "Aceptado") -> dict[int, Any]:
-    """Respuesta 202 con ejemplo."""
+def R202(example: Any, description: str = "Accepted") -> dict[int, Any]:
+    """202 response with example."""
     return {
         202: {
             "description": description,

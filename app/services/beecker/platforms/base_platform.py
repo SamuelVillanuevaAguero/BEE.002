@@ -94,17 +94,17 @@ class BasePlatform(ABC):
             Refresh token.
     """
 
-    BASE_URL: str = ""  # Subclase define su URL base (RPA)
+    BASE_URL: str = ""  # Subclass defines its base URL (RPA)
 
     def __init__(self):
         self._access_token:  Optional[str] = None
         self._refresh_token: Optional[str] = None
-        self._email:         Optional[str] = None   # ← nuevo
-        self._password:      Optional[str] = None   # ← nuevo
+        self._email:         Optional[str] = None   # ← new
+        self._password:      Optional[str] = None   # ← new
         self._http = HttpClient()
 
     # ------------------------------------------------------------------
-    # Autenticación
+    # Authentication
     # ------------------------------------------------------------------
 
     @abstractmethod
@@ -136,7 +136,7 @@ class BasePlatform(ABC):
         """
 
     # ------------------------------------------------------------------
-    # RPA — Historial de ejecuciones
+    # RPA — Run history
     # ------------------------------------------------------------------
 
     @abstractmethod
@@ -239,7 +239,7 @@ class BasePlatform(ABC):
         """
 
     # ------------------------------------------------------------------
-    # Agent — Historial de ejecuciones
+    # Agent — Run history
     # ------------------------------------------------------------------
 
     @abstractmethod
@@ -298,7 +298,7 @@ class BasePlatform(ABC):
         """
 
     # ------------------------------------------------------------------
-    # Agent — Progreso de ejecución
+    # Agent — Execution progress
     # ------------------------------------------------------------------
 
     @abstractmethod
@@ -378,7 +378,7 @@ class BasePlatform(ABC):
         PlatformAPIError
             Any other HTTP error.
         """
-        # ── Refrescar token proactivamente si está por expirar ────────────────
+        # ── Refresh token proactively if it is about to expire ───────────────
         if self._email and self._access_token:
             from app.utils.session_manager import beecker_session
             fresh_token = await beecker_session.get_token(
@@ -392,7 +392,7 @@ class BasePlatform(ABC):
 
         result = await self._http.post(endpoint, json=payload, params=params or {})
 
-        # ── 401 inesperado: invalidar singleton y reintentar una vez ──────────
+        # ── Unexpected 401: invalidate singleton and retry once ────────────────
         if result.get("status_code") == 401 and self._email:
             from app.utils.session_manager import beecker_session
             beecker_session.force_invalidate()
@@ -405,7 +405,7 @@ class BasePlatform(ABC):
             self._http.set_header("Authorization", f"Bearer {fresh_token}")
             result = await self._http.post(endpoint, json=payload, params=params or {})
 
-        # ── Manejo de errores ─────────────────────────────────────────────────
+        # ── Error handling ───────────────────────────────────────────────────
         if result["success"]:
             return result["data"]
 

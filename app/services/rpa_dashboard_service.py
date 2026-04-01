@@ -141,10 +141,10 @@ def _get_monitoring_or_404(db: Session, monitoring_id: str, table) -> object:
     return mon
 
 
-# ── RPADashboard — Atómico ────────────────────────────────────────────────────
+# ── RPADashboard — Atomic ─────────────────────────────────────────────────────
 
 def create_rpa_dashboard_atomic(db: Session, payload: RPADashboardAtomicCreate) -> dict:
-    # 1. Cliente
+    # 1. Client
     client = get_or_create_client(db, payload.client.id, payload.client.name)
 
     # 2. Bot
@@ -214,10 +214,10 @@ def create_rpa_dashboard_atomic(db: Session, payload: RPADashboardAtomicCreate) 
     }
 
 
-# ── RPAUiPath — Atómico ───────────────────────────────────────────────────────
+# ── RPAUiPath — Atomic ───────────────────────────────────────────────────────
 
 def create_rpa_uipath_atomic(db: Session, payload: RPAUiPathAtomicCreate) -> dict:
-    # 1. Cliente
+    # 1. Client
     client = get_or_create_client(db, payload.client.id, payload.client.name)
 
     # 2. Bot
@@ -287,7 +287,7 @@ def create_rpa_uipath_atomic(db: Session, payload: RPAUiPathAtomicCreate) -> dic
     }
 
 
-# ── GET: Listados generales ───────────────────────────────────────────────────
+# ── GET: General listings ────────────────────────────────────────────────────
 
 def list_rpa_dashboards(db: Session) -> list:
     return db.query(RPADashboard).order_by(RPADashboard.id_beecker).all()
@@ -315,7 +315,7 @@ def list_uipath_errors(db: Session, robot_name: str) -> list[str]:
     return rpa.business_errors or []
 
 
-# ── GET: Monitoreos por bot ───────────────────────────────────────────────────
+# ── GET: Monitors by bot ────────────────────────────────────────────────────
 
 def list_monitoring_by_id_beecker(db: Session, id_beecker: str) -> list[dict]:
     """
@@ -337,7 +337,7 @@ def list_monitoring_by_id_beecker(db: Session, id_beecker: str) -> list[dict]:
     return [_build_monitoring_response(m, m.job) for m in mons]
 
 
-# ── GET: Listados de monitoreos completos ─────────────────────────────────────
+# ── GET: Full monitor listings ──────────────────────────────────────────────
 
 def list_dashboard_monitoring(db: Session) -> list[dict]:
     mons = (

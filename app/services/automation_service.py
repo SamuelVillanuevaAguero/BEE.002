@@ -28,10 +28,10 @@ def create_client(db, client_name: str):
 # ---------------------------------------------------------
 def create_rpa_dashboard(db, payload):
     """
-    Crea el registro base en rpa_dashboard.
-    PK = id_beecker (ej: "AEC.001").
-    id_dashboard = ID numérico para la API de Beecker (ej: "104").
-    business_errors = lista JSON opcional (ej: ["Business Exception"]).
+    Create the base record in rpa_dashboard.
+    PK = id_beecker (e.g. "AEC.001").
+    id_dashboard = numeric platform ID for the Beecker API (e.g. "104").
+    business_errors = optional JSON list (e.g. ["Business Exception"]).
     """
     rpa = RPADashboard(
         id_beecker=payload.id_beecker,
@@ -54,8 +54,8 @@ def create_rpa_dashboard(db, payload):
 # ---------------------------------------------------------
 def link_rpa_dashboard_monitoring(db, payload):
     """
-    Crea el registro de configuración en rpa_dashboard_monitoring.
-    id_beecker → rpa_dashboard.id_beecker (ej: "AEC.001")
+    Create the monitoring configuration record in rpa_dashboard_monitoring.
+    id_beecker → rpa_dashboard.id_beecker (e.g. "AEC.001")
     """
     relation = RPADashboardMonitoring(
         id=str(uuid.uuid4()),

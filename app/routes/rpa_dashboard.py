@@ -47,7 +47,7 @@ uipath_router = APIRouter(prefix="/rpa-uipath", tags=["RPA UiPath"])
 
 
 @dashboard_router.post(
-    "/full",
+    "/",
     response_model=RPADashboardFullResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create Dashboard BOT (atomic)",
@@ -123,7 +123,7 @@ _UIPATH_BOT_EXAMPLE = {
 }
 
 
-@dashboard_router.post(
+'''@dashboard_router.post(
     "/",
     response_model=AtomicCreateResponse,
     status_code=status.HTTP_201_CREATED,
@@ -143,7 +143,7 @@ def create_rpa_dashboard(
     api_key: str = Depends(verify_api_key),
 ):
     return rpa_dashboard_service.create_rpa_dashboard_atomic(db, payload)
-
+'''
 
 @dashboard_router.get(
     "/",

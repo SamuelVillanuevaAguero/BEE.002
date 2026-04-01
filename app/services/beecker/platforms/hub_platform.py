@@ -44,7 +44,7 @@ from .base_platform import (
     PlatformNotFoundError,
 )
 
-# Campos del esquema normalizado base (siempre presentes en cualquier agente)
+# Core normalized schema fields (always present for any agent)
 _AGENT_CORE_PROPS = {"id", "start_run", "run_state", "current_step"}
 
 
@@ -73,7 +73,7 @@ class HubPlatform(BasePlatform):
 
     AGENT_BASE_URL = "https://app-bap-arca-prod-fzdvh8dva2dkdud3.eastus-01.azurewebsites.net/api"
 
-    # Cache interno: agent_id (str) → agent_name (str, en minúsculas)
+    # Internal cache: agent_id (str) → agent_name (str, lowercase)
     _agent_name_cache: Dict[str, str]
 
     def __init__(self):
@@ -81,7 +81,7 @@ class HubPlatform(BasePlatform):
         self._agent_name_cache = {}
 
     # ------------------------------------------------------------------
-    # Autenticación
+    # Authentication
     # ------------------------------------------------------------------
 
     async def login(self, email: str, password: str) -> Dict[str, Any]:
@@ -162,9 +162,9 @@ class HubPlatform(BasePlatform):
         page: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        TODO: Implementar cuando se tengan los endpoints RPA de Hub.
+        TODO: Implement when Hub RPA endpoints become available.
 
-        Esquema de retorno esperado idéntico al de CloudPlatform.get_transactions().
+        Expected return schema identical to CloudPlatform.get_transactions().
         """
         raise NotImplementedError(
             "[HubPlatform] get_transactions() pendiente. "
@@ -172,7 +172,7 @@ class HubPlatform(BasePlatform):
         )
 
     def _normalize_transactions(self, raw: Dict) -> Dict[str, Any]:
-        """TODO: Implementar cuando se conozca la estructura de Hub."""
+        """TODO: Implement when the Hub response structure is known."""
         raise NotImplementedError("[HubPlatform] _normalize_transactions() pendiente.")
 
     async def get_agent_menu(self) -> Dict[str, Any]:
@@ -220,7 +220,7 @@ class HubPlatform(BasePlatform):
         endpoint = f"{self.AGENT_BASE_URL}/agents/menu/"
         data = await self._get(endpoint)
 
-        # Poblar cache: agent_id (str) → agent_name en minúsculas
+        # Populate cache: agent_id (str) → agent_name in lowercase
         for agent in data.get("agents", []):
             agent_id   = str(agent.get("id", ""))
             agent_name = agent.get("agent_name", "")
@@ -312,7 +312,7 @@ class HubPlatform(BasePlatform):
         """
         self._require_auth()
 
-        # Resolver nombre del agente (con cache)
+        # Resolve the agent name (with cache)
         agent_name = await self._resolve_agent_name(process_id)
 
         endpoint = f"{self.AGENT_BASE_URL}/agent/{agent_name}/run_history/"
@@ -378,7 +378,7 @@ class HubPlatform(BasePlatform):
         }
 
     # ------------------------------------------------------------------
-    # Agent — Progreso de ejecución
+    # Agent — Execution progress
     # ------------------------------------------------------------------
 
     async def get_agent_progress(
