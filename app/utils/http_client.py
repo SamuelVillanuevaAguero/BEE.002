@@ -96,7 +96,6 @@ class HttpClient:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 try:
                     logger.debug(f"fetching {method} {url}" + (f" (retry {attempt})" if attempt else ""))
-                    print(f"fetching {method} {url}")
 
                     response = await client.request(
                         method=method,
@@ -113,7 +112,7 @@ class HttpClient:
                     except Exception:
                         content = response.text
 
-                    print(f"Response {response.status_code}")
+                    logger.debug(f"Response {response.status_code}")
                     return {
                         "success":     True,
                         "status_code": response.status_code,
@@ -123,7 +122,7 @@ class HttpClient:
 
                 except httpx.HTTPStatusError as e:
                     status_code = e.response.status_code
-                    print(f"HTTP error {status_code}: {e}")
+                    logger.error(f"HTTP error {status_code}: {e}")
                     last_result = {
                         "success":     False,
                         "status_code": status_code,
@@ -132,7 +131,7 @@ class HttpClient:
                     }
 
                 except httpx.RequestError as e:
-                    print(f"Request error: {str(e)}")
+                    logger.error(f"Request error: {str(e)}")
                     last_result = {
                         "success":     False,
                         "status_code": 0,
@@ -141,7 +140,7 @@ class HttpClient:
                     }
 
                 except Exception as e:
-                    print(f"Unexpected error: {str(e)}")
+                    logger.error(f"Unexpected error: {str(e)}")
                     last_result = {
                         "success":     False,
                         "status_code": 0,
@@ -161,10 +160,6 @@ class HttpClient:
                 logger.warning(
                     f"[HttpClient] Reintento {attempt + 1}/{self._max_retries} "
                     f"en {wait:.1f}s para {url}... (status={status_code})"
-                )
-                print(
-                    f"[CloudPlatform] Reintento {attempt + 1}/{self._max_retries} "
-                    f"en {wait:.0f}s para {url}..."
                 )
                 await asyncio.sleep(wait)
 

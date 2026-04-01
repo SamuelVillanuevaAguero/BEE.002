@@ -28,11 +28,24 @@ def _build_trigger(trigger_type: TriggerType, trigger_args: dict):
         case TriggerType.cron:
             return CronTrigger(**trigger_args)
         case TriggerType.interval:
-            return IntervalTrigger(**trigger_args)
+            normalized_args = _normalize_interval_args(trigger_args)
+            return IntervalTrigger(**normalized_args)
         case TriggerType.date:
             return DateTrigger(**trigger_args)
         case _:
             raise ValueError(f"Tipo de trigger no soportado: {trigger_type}")
+
+
+def _normalize_interval_args(trigger_args: dict) -> dict:
+    normalized = dict(trigger_args or {})
+    for key in ("weeks", "days", "hours", "minutes", "seconds"):
+        value = normalized.get(key)
+        if isinstance(value, str):
+            try:
+                normalized[key] = int(value)
+            except ValueError:
+                pass
+    return normalized
 
 
 def _resolve_func(task_path: str):

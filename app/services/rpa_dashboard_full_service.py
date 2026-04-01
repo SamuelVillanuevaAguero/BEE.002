@@ -76,6 +76,66 @@ def _resolve_client(db: Session, client_payload: ClientInline) -> tuple[Client, 
     return client, True
 
 
+def _resolve_rpa(db: Session, rpa_payload) -> tuple[RPADashboard, bool]:
+    """Resuelve el bot a usar en la transacción."""
+    existing = db.get(RPADashboard, rpa_payload.id_beecker)
+    if existing:
+        if rpa_payload.id_dashboard and rpa_payload.id_dashboard != existing.id_dashboard:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "El bot ya existe, pero id_dashboard no coincide con el registro existente. "
+                    "Envía solo id_beecker o los mismos datos completos."
+                ),
+            )
+        if rpa_payload.process_name and rpa_payload.process_name != existing.process_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "El bot ya existe, pero process_name no coincide con el registro existente. "
+                    "Envía solo id_beecker o los mismos datos completos."
+                ),
+            )
+        if rpa_payload.platform and rpa_payload.platform != existing.platform:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "El bot ya existe, pero platform no coincide con el registro existente. "
+                    "Envía solo id_beecker o los mismos datos completos."
+                ),
+            )
+
+        logger.info(f"♻️ Usando bot existente | id_beecker='{rpa_payload.id_beecker}'")
+        return existing, False
+
+    missing = [
+        name for name, value in {
+            "id_dashboard": rpa_payload.id_dashboard,
+            "process_name": rpa_payload.process_name,
+            "platform": rpa_payload.platform,
+        }.items() if not value
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"No existe un bot con id_beecker='{rpa_payload.id_beecker}'. "
+                f"Para crearlo debes enviar: {missing}."
+            ),
+        )
+
+    rpa = RPADashboard(
+        id_beecker=rpa_payload.id_beecker,
+        id_dashboard=rpa_payload.id_dashboard,
+        process_name=rpa_payload.process_name,
+        platform=rpa_payload.platform,
+        id_client="",
+        business_errors=None,
+    )
+    logger.info(f"🆕 Bot nuevo encolado | id_beecker='{rpa_payload.id_beecker}'")
+    return rpa, True
+
+
 # ── Función principal ─────────────────────────────────────────────────────────
 
 def create_rpa_dashboard_full(
@@ -104,14 +164,7 @@ def create_rpa_dashboard_full(
 
     id_beecker = payload.rpa.id_beecker
 
-    # ── 1. Validar duplicado de bot ───────────────────────────────────────────
-    if db.get(RPADashboard, id_beecker):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Ya existe un bot con id_beecker='{id_beecker}'.",
-        )
-
-    # ── 2. Validar job parcial ────────────────────────────────────────────────
+    # ── 1. Validar job parcial ────────────────────────────────────────────────
     job_payload = payload.job
     has_any_job_field = job_payload and any([
         job_payload.name, job_payload.task_path,
@@ -135,16 +188,12 @@ def create_rpa_dashboard_full(
     # ── 3. Resolver cliente ───────────────────────────────────────────────────
     client, client_created = _resolve_client(db, payload.client)
 
-    # ── 4. Construir RPADashboard ─────────────────────────────────────────────
-    rpa = RPADashboard(
-        id_beecker=id_beecker,
-        id_dashboard=payload.rpa.id_dashboard,
-        process_name=payload.rpa.process_name,
-        platform=payload.rpa.platform,
-        id_client=client.id,
-        business_errors=payload.business_errors or None,
-    )
-    db.add(rpa)
+    # ── 4. Resolver o crear el bot ─────────────────────────────────────────────
+    rpa, rpa_created = _resolve_rpa(db, payload.rpa)
+    if rpa_created:
+        rpa.id_client = client.id
+        rpa.business_errors = payload.business_errors or None
+        db.add(rpa)
 
     # ── 5. Construir monitoring ───────────────────────────────────────────────
     monitoring_id = str(uuid.uuid4())

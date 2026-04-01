@@ -34,12 +34,9 @@ class Settings(BaseSettings):
         )
         if self.APP_ENV == "production":
             url += f"?ssl_ca={self.DB_SSL_CA}"
+        else:
+            url += "?ssl_disabled=true"
         return url
-
-    @property
-    def APSCHEDULER_URL(self) -> str:
-        """URL for APScheduler jobstore (uses the same DB)."""
-        return self.DATABASE_URL
 
 
 settings = Settings()

@@ -54,7 +54,7 @@ from app.schemas.client import ClientInlineResponse
 from app.schemas.rpa_dashboard import (
     TransactionUnitSchema,
     ManageFlagsSchema,
-    RPADashboardMonitoringResponse,
+    MonitoringResponse,
 )
 
 
@@ -109,10 +109,16 @@ class ClientInline(BaseModel):
 # ── Sub-schema: datos del bot ─────────────────────────────────────────────────
 
 class RPAInline(BaseModel):
-    """Datos del registro base en rpa_dashboard."""
+    """Datos del registro base en rpa_dashboard.
 
-    id_dashboard: str = Field(
-        ..., max_length=40,
+    Comportamiento:
+    - Si el bot existe por id_beecker, basta con enviar solo id_beecker.
+    - Si el bot no existe, es obligatorio enviar id_dashboard, process_name y platform.
+    """
+
+    id_dashboard: Optional[str] = Field(
+        default=None,
+        max_length=40,
         description="ID numérico para la API de Beecker (ej: '111')",
         examples=["111"],
     )
@@ -121,13 +127,26 @@ class RPAInline(BaseModel):
         description="Identificador ROC visible en Slack (ej: 'CFC.003')",
         examples=["CFC.003"],
     )
-    process_name: str = Field(..., max_length=200, examples=["Procesamiento de complementos de pago"])
-    platform: PlatformType
+    process_name: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        examples=["Procesamiento de complementos de pago"],
+    )
+    platform: Optional[PlatformType] = None
 
     @field_validator("id_dashboard", "id_beecker", "process_name", mode="before")
     @classmethod
     def strip_strings(cls, v: str) -> str:
         return v.strip() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def validate_create_fields(self) -> "RPAInline":
+        creation_fields = [self.id_dashboard, self.process_name, self.platform]
+        if any(creation_fields) and not all(creation_fields):
+            raise ValueError(
+                "Si envías datos de RPA para crear, debes incluir id_dashboard, process_name y platform."
+            )
+        return self
 
 
 # ── Sub-schema: job opcional ──────────────────────────────────────────────────
@@ -142,10 +161,10 @@ class JobInline(BaseModel):
     task_path: Optional[str] = Field(
         default=None,
         description="Python path de la función",
-        examples=["app.tasks.rpa_tasks:send_rpa_status_task"],
+        examples=["app.tasks.rpa_tasks:scheduled_rpa_status"],
     )
-    trigger_type: Optional[str] = Field(default=None, examples=["cron"])
-    trigger_args: Optional[dict[str, Any]] = Field(default=None, examples=[{"hour": "*/1"}])
+    trigger_type: Optional[str] = Field(default=None, examples=["interval"])
+    trigger_args: Optional[dict[str, Any]] = Field(default=None, examples=[{"minutes": 5}])
     job_kwargs: Optional[dict[str, Any]] = Field(default_factory=dict)
 
     @property
@@ -211,7 +230,7 @@ class RPADashboardFullResponse(BaseModel):
     process_name: str
     platform: PlatformType
     business_errors: Optional[List[str]] = None
-    monitoring: RPADashboardMonitoringResponse
+    monitoring: MonitoringResponse
     job_created: bool = Field(
         default=False,
         description="True si se creó y vinculó un job al monitoring.",

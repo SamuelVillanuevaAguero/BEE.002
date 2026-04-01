@@ -10,11 +10,11 @@ Configuration loading flows:
     · load_agent_config(AgentConfig) → initializes monitoring for agents.
 
 Public notification methods for RPA:
-    - send_initial_rpa(bot_id)        → Execution start message.
-    - send_status_rpa(run_id, bot_id) → Full execution snapshot with alerts.
+    - send_initial_rpa(bot_id, run_id) → Execution start message.
+    - send_status_rpa(run_id, bot_id)  → Full execution snapshot with alerts.
 
 Public notification methods for Agents:
-    - send_status_agent(agent_id)     → Agent summary for a given interval.
+    - send_status_agent(agent_id)      → Agent summary for a given interval.
 
 Error handling:
     - Any exception raised in public methods is reported to CHANNEL_ERROR in Slack.
@@ -24,11 +24,12 @@ Error handling:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import traceback as tb
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -67,26 +68,16 @@ class _ErrorMessages:
         name_label = bot_name.upper() if bot_name else "(No identificado)"
 
         lines = [
-            "¡Atención equipo! :luz_giratoia_movimiento:",
-            f"Se presentó un error en el monitoreo → `{name_label}`",
-            "",
+            "¡Atención equipo!",
+            f"*Se detectó un error en el agente monitor* — `{name_label}`",
+            f"*Hora:* {now}",
         ]
-
         if context:
-            lines.append(f"*Operación:* `{context}`")
-
-        lines.append(f"*Hora:*      {now}")
-        lines.append("")
-        lines.append(f"*Error:*\n```{issue}```")
-
+            lines += ["", f"*Contexto:* `{context}`"]
+        if issue:
+            lines += ["", f"*Error:* {issue}"]
         if traceback_str:
-            max_tb_chars = 2800
-            tb_display = (
-                traceback_str[:max_tb_chars] + "\n… (truncado)"
-                if len(traceback_str) > max_tb_chars
-                else traceback_str
-            )
-            lines.append(f"\n*Traceback:*\n```{tb_display}```")
+            lines += ["", f"```{traceback_str[-1500:]}```"]
 
         return "\n".join(lines)
 
@@ -95,7 +86,7 @@ class _ErrorMessages:
 
 class MonitoringAgent:
     """
-    Monitoring agent for Beecker processes (RPA and Agents).
+    Main monitoring orchestrator.
 
     All public methods are asynchronous and must run inside an event loop.
 
@@ -104,7 +95,7 @@ class MonitoringAgent:
         config = RPAConfig(bot_name="AIN.002", process_name="Order entry")
         agent  = MonitoringAgent()
         await agent.load_config(config)
-        await agent.send_initial_rpa(bot_id="104")
+        await agent.send_initial_rpa(bot_id="104", run_id="165685")
         await agent.send_status_rpa(run_id=162389, bot_id="104")
 
     Usage for Agents::
@@ -161,7 +152,6 @@ class MonitoringAgent:
             SlackErrorAuthenticate: If the Slack token is invalid.
             BeeckerAPIError: If Beecker authentication fails.
         """
-        
         from app.utils.session_manager import beecker_session, slack_session, freshdesk_session
 
         config.validate()
@@ -174,7 +164,7 @@ class MonitoringAgent:
 
         # Beecker — singleton con auto-refresh
         api = BeeckerAPI(platform=config.platform)
-        await api.login(config.email_dash, config.password_dash)  # usa el singleton internamente
+        await api.login(config.email_dash, config.password_dash)
         self.__api_beecker = api
 
         # FreshDesk — singleton
@@ -182,7 +172,7 @@ class MonitoringAgent:
             self.__api_freshdesk = await freshdesk_session.get_api(
                 config.username_freshdesk, config.password_freshdesk
             )
- 
+
     async def load_agent_config(self, config: AgentConfig) -> None:
         """
         Load the Agent configuration and authenticate all required platforms.
@@ -240,9 +230,18 @@ class MonitoringAgent:
 
     # ── Métodos públicos RPA ──────────────────────────────────────────────────
 
-    async def send_initial_rpa(self, bot_id: str) -> None:
+    async def send_initial_rpa(self, bot_id: str, run_id: str | None = None) -> None:
         """
         Send the execution start notification to the configured Slack channel.
+        Includes the #run_id to identify the specific execution.
+
+        Args:
+            bot_id:  id_dashboard del bot (para logs).
+            run_id:  Identificador numérico de la ejecución (ej: "100036").
+
+        Args:
+            bot_id: Numeric dashboard ID used for logging.
+            run_id: Execution run ID to display in the message (e.g. "165685"). Optional.
 
         Raises:
             RuntimeError: If load_config() has not been called previously.
@@ -254,27 +253,29 @@ class MonitoringAgent:
             message = self._rpa_message_builder.build_initial(
                 bot_id=self.__rpa_config.bot_name,
                 bot_name=self.__rpa_config.process_name,
+                run_id=run_id,
             )
             await self.__api_slack.send_message(
                 channel_name=self.__rpa_config.channel_name,
                 message=message,
             )
             logger.info(
-                f"Mensaje de inicio enviado para bot_id={bot_id} "
+                f"Mensaje de inicio enviado para bot_id={bot_id} | run_id={run_id} "
                 f"en canal {self.__rpa_config.channel_name}."
             )
 
         except Exception as e:
             await self._send_error_to_slack(
                 issue=str(e),
-                context=f"send_initial_rpa(bot_id={bot_id})",
+                context=f"send_initial_rpa(bot_id={bot_id}, run_id={run_id})",
                 traceback_str=tb.format_exc(),
             )
             raise
 
     async def send_status_rpa(self, run_id: int, bot_id: str) -> str:
         """
-        Retrieve the current RPA execution status and send the notification to Slack.
+        Retrieve the current RPA execution status and send a single-execution
+        notification to Slack. Used by bee_informa.
 
         Raises:
             RuntimeError: If load_config() has not been called previously.
@@ -322,13 +323,111 @@ class MonitoringAgent:
 
             return run_state
 
-        except RunNotYetAvailableError:   # ← agregar antes del except genérico
+        except RunNotYetAvailableError:
             raise
 
         except Exception as e:
             await self._send_error_to_slack(
                 issue=str(e),
                 context=f"send_status_rpa(run_id={run_id}, bot_id={bot_id})",
+                traceback_str=tb.format_exc(),
+            )
+            raise
+
+    async def send_status_rpa_multi(
+        self,
+        run_ids: List[int],
+        bot_id: str,
+    ) -> Dict[str, str]:
+        """
+        Obtiene el status de TODAS las run_ids activas y envía UN ÚNICO mensaje
+        fusionado al canal Slack. Usado exclusivamente por bee_observa.
+
+        Los run_ids deben llegar ya ordenados cronológicamente (ascendente) —
+        el caller (_dispatch_status_multi en rpa_orchestration_service) lo garantiza.
+
+        Args:
+            run_ids:  Lista de run_ids numéricos, ya ordenados cronológicamente.
+            bot_id:   id_dashboard del bot para llamadas a Beecker API.
+
+        Returns:
+            dict {str(run_id): run_state} con el estado de cada ejecución procesada.
+            Si ningún run_id está disponible aún, retorna {} sin enviar mensaje.
+
+        Raises:
+            RuntimeError: Si load_config() no fue llamado previamente.
+        """
+        try:
+            if self.__rpa_config is None or self.__api_beecker is None:
+                raise RuntimeError("Debes llamar a load_config() antes de send_status_rpa_multi().")
+
+            config = self.__rpa_config
+
+            # 1. Obtener status de cada run_id (concurrente para eficiencia)
+            skipped: list[int] = []
+
+            async def _fetch_one(rid: int) -> dict | None:
+                try:
+                    s = await self.__api_beecker.get_rpa_status(run_id=rid, bot_id=bot_id)
+                    if not config.enable_overtime_check:
+                        s = {**s, "overtime_flag": False}
+                    return s
+                except RunNotYetAvailableError:
+                    logger.warning(
+                        f"⏳ [MULTI] run_id={rid} no disponible aún, se omite en este tick"
+                    )
+                    skipped.append(rid)
+                    return None
+
+            fetched = await asyncio.gather(*[_fetch_one(rid) for rid in run_ids])
+            status_list = [s for s in fetched if s is not None]
+
+            if not status_list:
+                logger.warning(
+                    f"⏳ [MULTI] Ningún run_id disponible aún | run_ids={run_ids}"
+                )
+                return {}
+
+            # 2. Construir mensaje fusionado (un saludo + N bloques en orden cronológico)
+            message = self._rpa_message_builder.build_multi(
+                bot_id=config.bot_name,
+                bot_name=config.process_name,
+                status_list=status_list,
+                transaction_unit=config.transaction_unit,
+                transaction_unit_singular=config.transaction_unit_singular,
+                show_error_groups=config.show_error_groups,
+                max_error_groups=config.max_error_groups,
+                mention_user_ids=self._mention_ids,
+                freshdesk_url=self._get_effective_freshdesk_url(),
+            )
+
+            # 3. Enviar mensaje
+            await self.__api_slack.send_message(
+                channel_name=config.channel_name,
+                message=message,
+            )
+            logger.info(
+                f"Mensaje fusionado enviado | run_ids={run_ids} | bot_id={bot_id} | "
+                f"canal={config.channel_name}."
+            )
+
+            # 4. Gráfica — solo para ejecuciones terminadas
+            if config.enable_chart:
+                for status_dict in status_list:
+                    run_state_s = (status_dict.get("run_state") or "").lower().strip()
+                    if run_state_s not in _RPA_IN_PROGRESS_STATES:
+                        await self._send_rpa_chart(status=status_dict, config=config)
+
+            # 5. Retornar mapa {str(run_id): run_state}
+            return {
+                str(s["run_id"]): (s.get("run_state") or "").lower().strip()
+                for s in status_list
+            }
+
+        except Exception as e:
+            await self._send_error_to_slack(
+                issue=str(e),
+                context=f"send_status_rpa_multi(run_ids={run_ids}, bot_id={bot_id})",
                 traceback_str=tb.format_exc(),
             )
             raise
@@ -359,31 +458,12 @@ class MonitoringAgent:
                 raise RuntimeError("Debes llamar a load_agent_config() antes de send_status_agent().")
 
             config = self.__agent_config
-            now    = datetime.now()
 
-            # Resolver intervalo
-            start_str = (
-                now.replace(hour=0, minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
-                if start_datetime is None
-                else start_datetime
-            )
-            end_str = end_datetime if end_datetime is not None else now.strftime("%Y-%m-%d %H:%M:%S")
-
-            logger.info(
-                f"Obteniendo status del agente '{agent_id}' "
-                f"[{config.agent_name}] para el intervalo {start_str} → {end_str}"
-            )
-
-            # Consultar status desde Beecker
             agent_status = await self.__agent_beecker.get_agent_status(
                 agent_id=agent_id,
-                start_datetime=start_str,
-                end_datetime=end_str,
-                include_progress=config.include_progress,
+                start_datetime=start_datetime,
+                end_datetime=end_datetime,
             )
-
-            # Construir mensaje
-            freshdesk_url = self._agent_freshdesk_url if config.enable_freshdesk_link else None
 
             message = self._agent_message_builder.build(
                 agent_status=agent_status,
@@ -392,27 +472,28 @@ class MonitoringAgent:
                 execution_unit=config.execution_unit,
                 execution_unit_singular=config.execution_unit_singular,
                 execution_identifier_field=config.execution_identifier_field,
+                mention_user_ids=self._agent_mention_ids,
                 show_error_list=config.show_error_list,
                 show_error_categories=config.show_error_categories,
                 max_error_categories=config.max_error_categories,
                 error_similarity_threshold=config.error_similarity_threshold,
-                mention_user_ids=self._agent_mention_ids,
-                freshdesk_url=freshdesk_url,
                 failed_states=config.failed_states,
+                freshdesk_url=self._agent_freshdesk_url if config.enable_freshdesk_link else None,
             )
 
-            # Enviar mensaje
             await self.__api_slack.send_message(
                 channel_name=config.channel_name,
                 message=message,
             )
+
+            start_str = start_datetime or "inicio del día"
+            end_str   = end_datetime   or "ahora"
             logger.info(
-                f"Resumen del agente '{agent_id}' enviado a {config.channel_name}. "
+                f"Mensaje de agente enviado para agent_id={agent_id} en canal {config.channel_name}. "
                 f"Intervalo: {start_str} → {end_str}. "
                 f"Total: {agent_status.get('total_executions', 0)} ejecuciones."
             )
 
-            # Gráfica
             if config.enable_chart:
                 await self._send_agent_chart(agent_status=agent_status, config=config)
 

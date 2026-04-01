@@ -13,14 +13,27 @@ from app.schemas.client import ClientCreate, ClientUpdate
 logger = logging.getLogger(__name__)
 
 
-def create_client(db: Session, payload: ClientCreate) -> Client:
-    # Si no se envía id o viene vacío, generar UUID automáticamente
-    client_id = payload.id.strip() if payload.id and payload.id.strip() else str(uuid.uuid4())
+def get_or_create_client(db: Session, client_id: str | None, client_name: str | None) -> Client:
+    """
+    Lógica del fragmento client en el payload atómico:
+      - Si client_id tiene valor → buscar y retornar ese cliente (404 si no existe)
+      - Si client_id es None/vacío → crear nuevo cliente con client_name
+    """
+    cid = client_id.strip() if client_id and client_id.strip() else None
 
-    if db.get(Client, client_id):
+    if cid:
+        client = db.get(Client, cid)
+        if not client:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Cliente '{cid}' no encontrado.",
+            )
+        return client
+
+    if not client_name or not client_name.strip():
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Ya existe un cliente con id='{client_id}'.",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Si client.id es null, client.name es obligatorio para crear el cliente.",
         )
 
     client = Client(
@@ -51,10 +64,7 @@ def list_clients(db: Session) -> list[Client]:
 def get_client(db: Session, client_id: str) -> Client:
     client = db.get(Client, client_id)
     if not client:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Cliente '{client_id}' no encontrado.",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Cliente '{client_id}' no encontrado.")
     return client
 
 

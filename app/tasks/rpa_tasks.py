@@ -26,6 +26,9 @@ Cómo registrar un job para bee-observa:
 
 import asyncio
 import logging
+from app.db.session import SessionLocal
+from app.services.rpa_orchestration_service import send_rpa_status
+from app.services import job_service
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +52,6 @@ def scheduled_rpa_status(
                        Cada uno que termine en estado final se remueve de la lista.
         monitoring_id: PK del registro en rpa_dashboard_monitoring.
     """
-    from app.db.session import SessionLocal
-    from app.services.rpa_orchestration_service import send_rpa_status
-    from app.services import job_service
 
     # Usar run_ids si está disponible, sino caer a run_id simple (compatibilidad)
     active_run_ids: list[str] = run_ids if run_ids else ([run_id] if run_id else [])

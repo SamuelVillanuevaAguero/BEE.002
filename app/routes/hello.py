@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/rpa", tags=["RPA"])
 
 
-# routes/debug.py (solo para pruebas)
+# routes/debug.py (for testing only)
 @router.get("/debug/session")
 async def session_status():
     from app.utils.session_manager import beecker_session
@@ -39,7 +39,7 @@ async def start_execution(
 ) -> ExecutionResponse:
     config = RPAConfig(
         bot_name=payload.bot_name,
-        process_name="Proceso de prueba",
+        process_name="Test process",
     )
 
     try:
@@ -47,7 +47,7 @@ async def start_execution(
         await monitoring.load_config(config)
         await monitoring.send_initial_rpa(bot_id=payload.bot_id)
     except Exception as e:
-        logger.error(f"Error al iniciar monitoreo RPA: {e}")
+        logger.error(f"Error starting RPA monitoring: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
@@ -55,7 +55,7 @@ async def start_execution(
 
     return ExecutionResponse(
         success=True,
-        message=f"Monitoreo iniciado para '{payload.bot_name}'.",
+        message=f"Monitoring started for '{payload.bot_name}'.",
         data={
             "id": payload.id,
             "bot_name": payload.bot_name,

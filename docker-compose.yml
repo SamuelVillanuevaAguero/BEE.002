@@ -30,6 +30,7 @@ services:
       - .env
     environment:
       DB_HOST: ${DB_HOST}
+      UVICORN_ARGS: ${UVICORN_ARGS}
     volumes:
       - .:/app
     depends_on:

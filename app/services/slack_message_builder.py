@@ -10,14 +10,14 @@ Responsibilities:
     - Receive the normalized dictionary returned by BeeckerAPI together with bot metadata.
     - Return only the final message string ready to be sent.
 
-Supported scenarios (invoked via build()):
+Supported scenarios (invoked via build() and build_multi()):
     - HAPPY_PATH       → Execution completed without errors.
     - PARTIAL_FAILURE  → Execution completed with failed transactions.
     - CRITICAL_FAILURE → Execution failed completely (run_state = failed).
     - OVERTIME         → Bot execution exceeded the reference average runtime.
 
 Separate method (does NOT go through build()):
-    - build_initial()  → Execution start message.
+    - build_initial()  → Execution start message (includes run_id if provided).
 
 Example::
 
@@ -26,9 +26,9 @@ Example::
     builder = RPAMessageBuilder()
 
     # Execution start notification
-    init_msg = builder.build_initial(bot_id="AIN.002", bot_name="Order entry")
+    init_msg = builder.build_initial(bot_id="AIN.002", bot_name="Order entry", run_id="165685")
 
-    # Execution status notification
+    # Single execution status notification
     message = builder.build(
         status_dict=api_response,
         bot_id="AIN.002",
@@ -38,6 +38,15 @@ Example::
         mention_user_ids=["U123ABC", "U456DEF"],
         freshdesk_url="https://...",
     )
+
+    # Fused multi-execution status notification (bee_observa)
+    message = builder.build_multi(
+        bot_id="MME.001",
+        bot_name="Gastos de viaje",
+        status_list=[status_123, status_124],   # already sorted chronologically
+        transaction_unit="Reportes",
+        transaction_unit_singular="Reporte",
+    )
 """
 
 from __future__ import annotations
@@ -46,7 +55,6 @@ import random
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import List, Optional
-
 
 
 class ExecutionScenario(Enum):
@@ -68,18 +76,6 @@ class ScenarioResolver:
     """
 
     def resolve(self, status: dict) -> ExecutionScenario:
-        """
-        Determine the execution scenario from the normalized status dictionary.
-
-        Args:
-            status: Normalized dictionary returned by BeeckerAPI.
-
-        Returns:
-            ExecutionScenario representing the detected execution state.
-
-        Raises:
-            ValueError: If the status dictionary is empty or missing required fields.
-        """
         if not status:
             raise ValueError(
                 "El dict de status está vacío. "
@@ -110,7 +106,6 @@ class ScenarioResolver:
             )
 
 
-
 class GreetingProvider:
     """Provides random greetings used at the beginning of Slack messages."""
 
@@ -127,7 +122,6 @@ class GreetingProvider:
         return random.choice(self._GREETINGS)
 
 
-
 @dataclass
 class MessageContext:
     """
@@ -140,6 +134,7 @@ class MessageContext:
         transaction_unit:          Transaction unit in plural form.
         transaction_unit_singular: Transaction unit in singular form.
         greeting:                  Greeting used at the start of the message.
+        run_id:                    Optional execution identifier shown in the header.
         show_error_groups:         Whether grouped error details should be included.
         max_error_groups:          Maximum number of error groups to display.
         mention_user_ids:          Slack user IDs to mention.
@@ -151,11 +146,11 @@ class MessageContext:
     transaction_unit: str
     transaction_unit_singular: str
     greeting: str
+    run_id: Optional[str] = None
     show_error_groups: bool = True
     max_error_groups: Optional[int] = None
     mention_user_ids: List[str] = field(default_factory=list)
     freshdesk_url: Optional[str] = None
-
 
 
 class _BaseMessageBuilder:
@@ -175,20 +170,27 @@ class _BaseMessageBuilder:
 
     @staticmethod
     def _bot_header(ctx: MessageContext) -> str:
-        """Generate the message header containing the bot identifier and execution state."""
+        """
+        Generate the message header containing the bot identifier and execution state.
+        If ctx.run_id is set, includes the execution number: La ejecución #123 del bot...
+        """
         run_state   = ctx.status.get("run_state", "").lower()
         in_progress = run_state in _BaseMessageBuilder._IN_PROGRESS_STATES
         verb        = "está en progreso" if in_progress else "ha finalizado"
         emoji       = _BaseMessageBuilder._STATE_EMOJI.get(run_state, "")
         emoji_str   = f" {emoji}" if emoji else ""
+
+        run_id = ctx.status.get("run_id")
+        run_id_tag = f" `#{run_id}`" if run_id else ""
+
         return (
-            f"La ejecución del bot `{ctx.bot_id.upper()}` *→ {ctx.bot_name}* "
+            f"La ejecución{run_id_tag} del bot `{ctx.bot_id.upper()}` *→ {ctx.bot_name}* "
             f"{verb}{emoji_str} `{run_state.capitalize()}`"
         )
 
     @staticmethod
     def _timing_info(status: dict) -> str:
-        """Generate the execution timing line including start, end and duration.""" 
+        """Generate the execution timing line including start, end and duration."""
         start = status.get("start_run", "N/A")
 
         if status.get("run_state") == "failed":
@@ -197,7 +199,7 @@ class _BaseMessageBuilder:
         elapsed = status.get("elapsed_minutes")
         elapsed_str = f" (duración: {elapsed:.1f} min)" if elapsed is not None else ""
 
-        if status.get("run_state") == "in progress":
+        if status.get("run_state") in ["in progress", "pending"]:
             return f"*Inicio:* {start}  -  *En curso:* {elapsed_str}"
 
         end = status.get("end_run", "En curso")
@@ -208,63 +210,51 @@ class _BaseMessageBuilder:
         status: dict, unit_plural: str, unit_singular: str
     ) -> list[str]:
         """Generate summary lines describing processed transactions."""
-        total     = status.get("total_transactions",    0)
+        total     = status.get("total_transactions", 0)
         completed = status.get("completed_transactions", 0)
-        failed    = status.get("failed_transactions",   0)
-        pct       = status.get("completion_percentage")
-        lines: list[str] = []
+        failed    = status.get("failed_transactions", 0)
+        pending   = max(0, total - completed - failed)
 
-        total_unit     = unit_singular if total     == 1 else unit_plural
-        completed_unit = unit_singular if completed == 1 else unit_plural
-        failed_unit    = unit_singular if failed    == 1 else unit_plural
+        unit = unit_plural if total != 1 else unit_singular
 
-        if total:
-            lines.append(f"Se procesaron *{total} {total_unit}* en total.")
-        if completed:
-            lines.append(f"  ➤ {completed} {completed_unit} con estado `Completed`")
-        if failed:
-            lines.append(f"  ➤ {failed} {failed_unit} con estado `Failed`")
-        if pct is not None:
-            lines.append(f"  ➤ Tasa de éxito: *{pct:.1f}%*")
+        lines = [f"Se han procesado *{completed}* de *{total}* {unit}."]
+
+        details = []
+        if failed > 0:
+            unit_f = unit_singular if failed == 1 else unit_plural
+            details.append(f"{failed} {unit_f} fallido{'s' if failed != 1 else ''}")
+        if pending > 0:
+            unit_p = unit_singular if pending == 1 else unit_plural
+            details.append(f"{pending} {unit_p} pendiente{'s' if pending != 1 else ''}")
+        if details:
+            lines.append(f"  ({' · '.join(details)})")
 
         return lines
 
     @staticmethod
     def _error_groups_section(
-        error_groups: list[dict],
+        error_groups: list,
         unit_plural: str,
         unit_singular: str,
         show: bool = True,
         max_groups: Optional[int] = None,
     ) -> list[str]:
-        """Format grouped transaction errors inside a Slack code block."""
+        """Generate the error groups section lines."""
         if not show or not error_groups:
             return []
 
-        groups_to_show = error_groups[:max_groups] if max_groups is not None else error_groups
-        omitted        = len(error_groups) - len(groups_to_show)
-
-        inner_lines = [f"Detalle de errores en {unit_plural} fallidos:", ""]
-
-        for i, group in enumerate(groups_to_show, start=1):
-            count       = group.get("count", 0)
-            rep         = group.get("representative", "Error desconocido")
-            rep_display = (rep[:120] + "…") if len(rep) > 120 else rep
-            unit_label  = unit_plural if count > 1 else unit_singular
-            inner_lines.append(f"  {i}. {rep_display}")
-            inner_lines.append(f"     → Afecta {count} {unit_label}")
-            inner_lines.append("")
-
-        if omitted > 0:
-            inner_lines.append(f"  … y {omitted} grupo(s) de error adicional(es) omitidos.")
-            inner_lines.append("")
-
-        block_content = "\n".join(inner_lines).rstrip()
-        return [f"```{block_content}```"]
+        groups = error_groups[:max_groups] if max_groups else error_groups
+        lines = ["*Grupos de error:*"]
+        for g in groups:
+            desc  = g.get("description", "Sin descripción")
+            count = g.get("count", 0)
+            unit  = unit_singular if count == 1 else unit_plural
+            lines.append(f"  • `{desc}` — {count} {unit}")
+        return lines
 
     @staticmethod
-    def _mentions_line(mention_user_ids: List[str]) -> Optional[str]:
-        """Generate a Slack mention line from resolved user IDs."""
+    def _mentions_line(mention_user_ids: list[str]) -> Optional[str]:
+        """Generate the mentions line."""
         if not mention_user_ids:
             return None
         mentions = " ".join(f"<@{uid}>" for uid in mention_user_ids)
@@ -272,34 +262,41 @@ class _BaseMessageBuilder:
 
     @staticmethod
     def _freshdesk_line(freshdesk_url: Optional[str]) -> Optional[str]:
-        """
-        Generate the FreshDesk link line.
-
-        Returns None when no URL is available.
-        """
+        """Generate the FreshDesk link line. Returns None when no URL is available."""
         if not freshdesk_url:
             return None
         return f"Tickets generados <{freshdesk_url}|FreshDesk>"
 
 
+# ── Scenario builders ─────────────────────────────────────────────────────────
 
 class HappyPathBuilder(_BaseMessageBuilder):
-    """Build message for executions completed without errors."""
+    """Build message for executions completed without errors (or with pending transactions)."""
 
     def build(self, ctx: MessageContext) -> str:
-        total = ctx.status.get("total_transactions", 0)
-        unit  = ctx.transaction_unit if total != 1 else ctx.transaction_unit_singular
+        total     = ctx.status.get("total_transactions", 0)
+        completed = ctx.status.get("completed_transactions", total)
+        failed    = ctx.status.get("failed_transactions", 0)
+        pending   = max(0, total - completed - failed)
+
+        unit_completed = ctx.transaction_unit if completed != 1 else ctx.transaction_unit_singular
+
         lines = [
             ctx.greeting,
             self._bot_header(ctx),
-            (
-                f"Se procesaron *{total} {unit}* correctamente. ✅"
-                if total >= 1
-                else f"Aún no se han procesado *{unit}*"
-            ),
-            "Sin errores reportados.",
-            self._timing_info(ctx.status),
         ]
+
+        if completed >= 1:
+            lines.append(f"Se procesaron *{completed} {unit_completed}* correctamente. ✅")
+        else:
+            lines.append(f"Aún no se han procesado *{ctx.transaction_unit}*")
+
+        if pending > 0:
+            unit_p = ctx.transaction_unit_singular if pending == 1 else ctx.transaction_unit
+            lines.append(f"  ({pending} {unit_p} pendiente{'s' if pending != 1 else ''})")
+
+        lines.append("Sin errores reportados.")
+        lines.append(self._timing_info(ctx.status))
         return "\n".join(lines)
 
 
@@ -330,7 +327,6 @@ class PartialFailureBuilder(_BaseMessageBuilder):
             self._timing_info(status),
         ]
 
-        # Link de FreshDesk (solo si hay fallas)
         freshdesk = self._freshdesk_line(ctx.freshdesk_url)
         if freshdesk:
             lines.extend(["", freshdesk])
@@ -353,20 +349,17 @@ class CriticalFailureBuilder(_BaseMessageBuilder):
             "",
         ]
 
-        # Menciones
         mention = self._mentions_line(ctx.mention_user_ids)
         if mention:
             lines.append(mention)
             lines.append("")
 
-        # Motivo del fallo
         run_details = status.get("details")
         if run_details:
             lines.append("*Motivo del fallo:*")
             lines.append(f"```{run_details}```")
             lines.append("")
 
-        # Grupos de error de transacciones (si existen)
         error_section = self._error_groups_section(
             status.get("error_groups", []),
             unit,
@@ -380,7 +373,6 @@ class CriticalFailureBuilder(_BaseMessageBuilder):
 
         lines.append(self._timing_info(status))
 
-        # Link de FreshDesk
         freshdesk = self._freshdesk_line(ctx.freshdesk_url)
         if freshdesk:
             lines.extend(["", freshdesk])
@@ -389,12 +381,7 @@ class CriticalFailureBuilder(_BaseMessageBuilder):
 
 
 class OvertimeBuilder(_BaseMessageBuilder):
-    """
-    Build message when overtime_flag = True.
-
-    Indicates that the bot exceeded its expected average execution time,
-    which may suggest abnormal processing volume or a stalled execution.
-    """
+    """Build message when overtime_flag = True."""
 
     def build(self, ctx: MessageContext) -> str:
         status  = ctx.status
@@ -448,13 +435,18 @@ class _InitialMessageBuilder(_BaseMessageBuilder):
     """Builder responsible for execution start notifications."""
 
     def build(self, ctx: MessageContext) -> str:
+        # Incluir #run_id en el mensaje si está disponible en ctx.status
+        run_id = ctx.status.get("run_id") if ctx.status else None
+        run_id_tag = f" `#{run_id}`" if run_id else ""
+
         lines = [
             ctx.greeting,
-            f"La ejecución del `{ctx.bot_id.upper()}` *→ {ctx.bot_name}* ha iniciado. :in_progress:",
+            f"La ejecución{run_id_tag} del `{ctx.bot_id.upper()}` *→ {ctx.bot_name}* ha iniciado. :in_progress:",
         ]
         return "\n".join(lines)
 
 
+# ── Registry y builder principal ──────────────────────────────────────────────
 
 _BUILDER_REGISTRY: dict[ExecutionScenario, _BaseMessageBuilder] = {
     ExecutionScenario.HAPPY_PATH:       HappyPathBuilder(),
@@ -463,7 +455,7 @@ _BUILDER_REGISTRY: dict[ExecutionScenario, _BaseMessageBuilder] = {
     ExecutionScenario.OVERTIME:         OvertimeBuilder(),
 }
 
-_INITIAL_BUILDER = _InitialMessageBuilder()
+_INITIAL_BUILDER  = _InitialMessageBuilder()
 
 
 class RPAMessageBuilder:
@@ -474,7 +466,7 @@ class RPAMessageBuilder:
 
     Main methods:
         build()         → Execution status message.
-        build_initial() → Execution start notification.
+        build_initial() → Execution start notification (acepta run_id opcional).
     """
 
     def __init__(
@@ -486,7 +478,6 @@ class RPAMessageBuilder:
         self._resolver  = resolver          or ScenarioResolver()
         self._greetings = greeting_provider or GreetingProvider()
         self._registry  = builder_registry  or _BUILDER_REGISTRY
-
 
     def build(
         self,
@@ -502,6 +493,7 @@ class RPAMessageBuilder:
     ) -> str:
         """
         Build the Slack message representing the current RPA execution state.
+        Used by bee_informa (single run_id, no run_id in header).
 
         The execution scenario (HAPPY_PATH, PARTIAL_FAILURE, CRITICAL_FAILURE,
         OVERTIME) is resolved automatically from the provided status_dict.
@@ -527,23 +519,78 @@ class RPAMessageBuilder:
 
         return builder.build(ctx)
 
-    def build_initial(self, bot_id: str, bot_name: str) -> str:
+    def build_multi(
+        self,
+        bot_id: str,
+        bot_name: str,
+        status_list: list[dict],
+        transaction_unit: str = "transacciones",
+        transaction_unit_singular: str = "transacción",
+        show_error_groups: bool = True,
+        max_error_groups: Optional[int] = None,
+        mention_user_ids: Optional[List[str]] = None,
+        freshdesk_url: Optional[str] = None,
+    ) -> str:
         """
-        Build the execution start message.
+        Build a fused message containing multiple execution status blocks.
+
+        The first block includes a greeting. Subsequent blocks omit the greeting
+        to avoid repeated salutations in the same message.
+        """
+        if not status_list:
+            raise ValueError("status_list cannot be empty for build_multi().")
+
+        blocks: list[str] = []
+        greeting = self._greetings.get()
+        mentions = mention_user_ids or []
+
+        for index, status_dict in enumerate(status_list):
+            scenario = self._resolver.resolve(status_dict)
+            builder = self._registry[scenario]
+
+            ctx = MessageContext(
+                status=status_dict,
+                bot_id=bot_id,
+                bot_name=bot_name,
+                transaction_unit=transaction_unit,
+                transaction_unit_singular=transaction_unit_singular,
+                greeting=greeting if index == 0 else "",
+                show_error_groups=show_error_groups,
+                max_error_groups=max_error_groups,
+                mention_user_ids=mentions,
+                freshdesk_url=freshdesk_url,
+            )
+            blocks.append(builder.build(ctx))
+
+        return "\n\n".join(blocks)
+
+    def build_initial(
+        self,
+        bot_id: str,
+        bot_name: str,
+        run_id: str | None = None,
+    ) -> str:
+        """
+        Build the execution start message, including the #run_id.
 
         This method does not require a status_dict and bypasses the
         ScenarioResolver because it is triggered when an execution begins.
+
+        Args:
+            bot_id:   Bot identifier (e.g. 'AIN.002').
+            bot_name: Human-readable bot name.
+            run_id:   Execution run ID to show in the message (e.g. "165685"). Optional.
         """
         ctx = MessageContext(
-            status={},
+            status={"run_id": run_id} if run_id else {},
             bot_id=bot_id,
             bot_name=bot_name,
             transaction_unit="",
             transaction_unit_singular="",
             greeting=self._greetings.get(),
+            run_id=run_id,
         )
         return _INITIAL_BUILDER.build(ctx)
-
 
     def build_for_scenario(
         self,
@@ -560,10 +607,8 @@ class RPAMessageBuilder:
     ) -> str:
         """
         Build a message forcing a specific execution scenario.
-
         Primarily used for testing and debugging message generation.
         """
-
         builder = self._registry[scenario]
         ctx = MessageContext(
             status=status_dict,

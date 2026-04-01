@@ -1,49 +1,58 @@
 """
 app/routes/rpa_dashboard.py
-=============================
-CRUD completo para RPADashboard, RPADashboardMonitoring, Job vinculation y BusinessErrors.
-Reemplaza el endpoint atómico anterior.
+
+Endpoints:
+    POST   /rpa-dashboard/                              → Create dashboard bot (atomic)
+    GET    /rpa-dashboard/                              → List dashboard bots
+    GET    /rpa-dashboard/monitoring                    → List all monitorings (+ job)
+    GET    /rpa-dashboard/{id_beecker}/errors           → List business errors of the bot
+    GET    /rpa-dashboard/{id_beecker}/monitoring       → List monitorings of the bot by id_beecker
+    PATCH  /rpa-dashboard/monitoring/{monitoring_id}    → Update monitoring
+    DELETE /rpa-dashboard/monitoring/{monitoring_id}    → Delete monitoring (+ job if linked)
+
+    POST   /rpa-uipath/                                 → Create UiPath bot (atomic)
+    GET    /rpa-uipath/                                 → List UiPath bots
+    GET    /rpa-uipath/monitoring                       → List all UiPath monitorings (+ job)
+    GET    /rpa-uipath/{robot_name}/errors              → List bot errors
+    PATCH  /rpa-uipath/monitoring/{monitoring_id}       → Update monitoring
+    DELETE /rpa-uipath/monitoring/{monitoring_id}       → Delete monitoring (+ job if linked)
+
+NOTE: Routes with a literal segment (/monitoring) must be declared BEFORE routes
+with a parameter (/{id_beecker}/...) so that FastAPI resolves them correctly.
 """
 import logging
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
+
 from app.db.session import get_db
 from app.schemas.rpa_dashboard import (
-    RPADashboardCreate,
-    RPADashboardUpdate,
+    RPADashboardAtomicCreate,
+    RPAUiPathAtomicCreate,
+    MonitoringPatch,
     RPADashboardResponse,
-    RPADashboardDetailResponse,
-    RPADashboardMonitoringCreate,
-    RPADashboardMonitoringUpdate,
-    RPADashboardMonitoringResponse,
-    JobLinkRequest,
-    BusinessErrorCreate,
-    BusinessErrorResponse
+    RPAUiPathResponse,
+    MonitoringResponse,
+    AtomicCreateResponse,
 )
+from app.utils.responses import R200, R200_list, R200_str_list, R201, R204, R404, COMMON
 from app.services import rpa_dashboard_service
 from app.utils.auth import verify_api_key
 from app.schemas.rpa_dashboard_full import RPADashboardFullCreate, RPADashboardFullResponse
 from app.services import rpa_dashboard_full_service
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/rpa-dashboard", tags=["RPA Dashboard"])
+
+dashboard_router = APIRouter(prefix="/rpa-dashboard", tags=["RPA Dashboard"])
+uipath_router = APIRouter(prefix="/rpa-uipath", tags=["RPA UiPath"])
 
 
-# ── RPADashboard ──────────────────────────────────────────────────────────────
-@router.post(
+@dashboard_router.post(
     "/full",
     response_model=RPADashboardFullResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Crear bot completo (atómico)",
+    summary="Create Dashboard BOT (atomic)",
     description=(
-        "Crea en **una sola transacción** el bot, su configuración de monitoreo "
-        "y opcionalmente el job de APScheduler.\n\n"
-        "**Rollback total** si cualquier paso falla.\n\n"
-        "- `rpa`: datos del bot (id_beecker, id_dashboard, process_name, platform).\n"
-        "- `id_client`: UUID del cliente (debe existir previamente).\n"
-        "- `business_errors`: lista de strings — se guarda como JSON en `rpa_dashboard`.\n"
-        "- `job`: opcional. Si se omite o viene `{}` no se crea job. "
-        "Si se envía, debe tener todos los campos (`name`, `task_path`, `trigger_type`, `trigger_args`)."
+        "Creates in a single transaction: client (or reuses existing), Dashboard bot, monitoring and job (paused). If the bot already exists by id_beecker, it is reused."
     ),
 )
 def create_rpa_dashboard_full(
@@ -53,227 +62,320 @@ def create_rpa_dashboard_full(
 ) -> RPADashboardFullResponse:
     return rpa_dashboard_full_service.create_rpa_dashboard_full(db, payload)
 
-@router.post(
+_MONITORING_EXAMPLE = {
+    "id": "a1b2c3d4-0000-0000-0000-000000000001",
+    "monitor_type": "bee_informa",
+    "slack_channel": "#roc-notificaciones",
+    "transaction_unit": "Facturas|Factura",
+    "roc_agents": ["agente@empresa.com"],
+    "manage_flags": {"start_active": True, "end_active": True},
+    "id_scheduler_job": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "job": {
+        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "name": "bee-informa | AEC.001",
+        "status": "paused",
+        "trigger_type": "interval",
+        "trigger_args": {"minutes": 5},
+        "next_run_time": None,
+    },
+}
+
+_ATOMIC_CREATE_EXAMPLE = {
+    "client": {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "client_name": "Empresa ABC",
+    },
+    "rpa": {
+        "id_beecker": "AEC.001",
+        "id_dashboard": "114",
+        "process_name": "Accounts Receivable Automation",
+        "platform": "beecker",
+        "id_client": "550e8400-e29b-41d4-a716-446655440000",
+        "business_errors": ["Business Exception"],
+    },
+    "monitoring": _MONITORING_EXAMPLE,
+    "job": {
+        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "name": "bee-informa | AEC.001",
+        "status": "paused",
+        "trigger_type": "interval",
+        "trigger_args": {"minutes": 5},
+        "next_run_time": None,
+    },
+}
+
+_DASHBOARD_BOT_EXAMPLE = {
+    "id_beecker": "AEC.001",
+    "id_dashboard": "114",
+    "process_name": "Accounts Receivable Automation",
+    "platform": "beecker",
+    "id_client": "550e8400-e29b-41d4-a716-446655440000",
+    "business_errors": ["Business Exception", "Application Exception"],
+}
+
+_UIPATH_BOT_EXAMPLE = {
+    "uipath_robot_name": "Robot_Ventas_01",
+    "id_beecker": "VNT.001",
+    "beecker_name": "Bot Ventas",
+    "framework": "REFramework",
+    "id_client": "550e8400-e29b-41d4-a716-446655440000",
+    "business_errors": ["Business Rule Violation"],
+}
+
+
+@dashboard_router.post(
     "/",
-    response_model=RPADashboardResponse,
+    response_model=AtomicCreateResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Crear bot base",
-    description="Crea el registro base del bot en `rpa_dashboard`. No crea monitoring ni errores.",
+    summary="Create Dashboard bot (atomic)",
+    description=(
+        "Creates in a single transaction: client (or reuses existing), Dashboard bot, "
+        "monitoring and job (paused). If the bot already exists by id_beecker, it is reused."
+    ),
+    responses={
+        **R201(_ATOMIC_CREATE_EXAMPLE, "Bot and monitoring created successfully"),
+        **COMMON,
+    },
 )
 def create_rpa_dashboard(
-    payload: RPADashboardCreate,
+    payload: RPADashboardAtomicCreate,
     db: Session = Depends(get_db),
     api_key: str = Depends(verify_api_key),
-) -> RPADashboardResponse:
-    return rpa_dashboard_service.create_rpa_dashboard(db, payload)
+):
+    return rpa_dashboard_service.create_rpa_dashboard_atomic(db, payload)
 
 
-@router.get(
+@dashboard_router.get(
     "/",
     response_model=list[RPADashboardResponse],
-    summary="Listar bots",
-    description="Devuelve todos los bots con sus campos base (sin monitorings ni errores anidados).",
+    summary="List Dashboard bots",
+    responses={
+        **R200_list([_DASHBOARD_BOT_EXAMPLE], "List of registered bots"),
+        **COMMON,
+    },
 )
 def list_rpa_dashboards(
     db: Session = Depends(get_db),
     api_key: str = Depends(verify_api_key),
-) -> list[RPADashboardResponse]:
+):
     return rpa_dashboard_service.list_rpa_dashboards(db)
 
 
-@router.get(
-    "/{id_beecker}",
-    response_model=RPADashboardDetailResponse,
-    summary="Obtener bot con detalle",
-    description="Devuelve el bot con sus monitorings y errores de negocio anidados.",
+@dashboard_router.get(
+    "/monitoring",
+    response_model=list[MonitoringResponse],
+    summary="List all Dashboard monitorings with job info",
+    description="Returns all rpa_dashboard_monitoring records with the nested job.",
+    responses={
+        **R200_list([_MONITORING_EXAMPLE], "List of monitorings with jobs"),
+        **COMMON,
+    },
 )
-def get_rpa_dashboard(
+def list_dashboard_monitoring(
+    db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key),
+):
+    return rpa_dashboard_service.list_dashboard_monitoring(db)
+
+
+@dashboard_router.get(
+    "/{id_beecker}/errors",
+    response_model=list[str],
+    summary="List business errors of the Dashboard bot",
+    responses={
+        **R200_str_list(
+            ["Business Exception", "Application Exception"],
+            "List of configured business errors",
+        ),
+        **R404,
+        **COMMON,
+    },
+)
+def list_dashboard_errors(
     id_beecker: str,
     db: Session = Depends(get_db),
     api_key: str = Depends(verify_api_key),
-) -> RPADashboardDetailResponse:
-    return rpa_dashboard_service.get_rpa_dashboard(db, id_beecker)
+):
+    return rpa_dashboard_service.list_dashboard_errors(db, id_beecker)
 
 
-@router.patch(
-    "/{id_beecker}",
-    response_model=RPADashboardResponse,
-    summary="Actualizar bot base",
-)
-def update_rpa_dashboard(
-    id_beecker: str,
-    payload: RPADashboardUpdate,
-    db: Session = Depends(get_db),
-    api_key: str = Depends(verify_api_key),
-) -> RPADashboardResponse:
-    return rpa_dashboard_service.update_rpa_dashboard(db, id_beecker, payload)
-
-
-@router.delete(
-    "/{id_beecker}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Eliminar bot",
-    description="Elimina el bot y en cascade sus monitorings y errores de negocio.",
-)
-def delete_rpa_dashboard(
-    id_beecker: str,
-    db: Session = Depends(get_db),
-    api_key: str = Depends(verify_api_key),
-) -> None:
-    rpa_dashboard_service.delete_rpa_dashboard(db, id_beecker)
-
-
-# ── RPADashboardMonitoring ────────────────────────────────────────────────────
-
-@router.post(
+@dashboard_router.get(
     "/{id_beecker}/monitoring",
-    response_model=RPADashboardMonitoringResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Crear configuración de monitoring",
-    description="Agrega una configuración de monitoreo (canal, tipo, agentes) al bot.",
-)
-def create_monitoring(
-    id_beecker: str,
-    payload: RPADashboardMonitoringCreate,
-    db: Session = Depends(get_db),
-    api_key: str = Depends(verify_api_key),
-) -> RPADashboardMonitoringResponse:
-    return rpa_dashboard_service.create_monitoring(db, id_beecker, payload)
-
-
-@router.get(
-    "/{id_beecker}/monitoring",
-    response_model=list[RPADashboardMonitoringResponse],
-    summary="Listar monitorings del bot",
-)
-def list_monitoring(
-    id_beecker: str,
-    db: Session = Depends(get_db),
-    api_key: str = Depends(verify_api_key),
-) -> list[RPADashboardMonitoringResponse]:
-    return rpa_dashboard_service.list_monitoring(db, id_beecker)
-
-
-@router.get(
-    "/{id_beecker}/monitoring/{monitoring_id}",
-    response_model=RPADashboardMonitoringResponse,
-    summary="Obtener monitoring específico",
-)
-def get_monitoring(
-    id_beecker: str,
-    monitoring_id: str,
-    db: Session = Depends(get_db),
-    api_key: str = Depends(verify_api_key),
-) -> RPADashboardMonitoringResponse:
-    return rpa_dashboard_service.get_monitoring(db, id_beecker, monitoring_id)
-
-
-@router.patch(
-    "/{id_beecker}/monitoring/{monitoring_id}",
-    response_model=RPADashboardMonitoringResponse,
-    summary="Actualizar monitoring",
-)
-def update_monitoring(
-    id_beecker: str,
-    monitoring_id: str,
-    payload: RPADashboardMonitoringUpdate,
-    db: Session = Depends(get_db),
-    api_key: str = Depends(verify_api_key),
-) -> RPADashboardMonitoringResponse:
-    return rpa_dashboard_service.update_monitoring(db, id_beecker, monitoring_id, payload)
-
-
-@router.delete(
-    "/{id_beecker}/monitoring/{monitoring_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Eliminar monitoring",
-    description="Elimina el monitoring. Si tiene job vinculado, lo elimina también.",
-)
-def delete_monitoring(
-    id_beecker: str,
-    monitoring_id: str,
-    db: Session = Depends(get_db),
-    api_key: str = Depends(verify_api_key),
-) -> None:
-    rpa_dashboard_service.delete_monitoring(db, id_beecker, monitoring_id)
-
-
-# ── Job vinculation ───────────────────────────────────────────────────────────
-
-@router.put(
-    "/{id_beecker}/monitoring/{monitoring_id}/job",
-    response_model=RPADashboardMonitoringResponse,
-    summary="Vincular job al monitoring",
+    response_model=list[MonitoringResponse],
+    summary="List monitorings of a Dashboard bot by id_beecker",
     description=(
-        "Vincula un job existente al monitoring. "
-        "Inyecta `bot_id` y `monitoring_id` en `job_kwargs` automáticamente. "
-        "Si el job está activo, lo pausa."
+        "Returns all rpa_dashboard_monitoring records associated with the bot. "
+        "A single bot can have N configurations (different channels, jobs and agents)."
     ),
+    responses={
+        **R200_list([_MONITORING_EXAMPLE], "List of bot monitorings with jobs"),
+        **R404,
+        **COMMON,
+    },
 )
-def link_job(
+def list_monitoring_by_id_beecker(
     id_beecker: str,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key),
+):
+    return rpa_dashboard_service.list_monitoring_by_id_beecker(db, id_beecker)
+
+
+@dashboard_router.patch(
+    "/monitoring/{monitoring_id}",
+    response_model=MonitoringResponse,
+    summary="Update Dashboard monitoring",
+    description="Updates the channel, flags, agents and transactional unit of the monitoring.",
+    responses={
+        **R200(_MONITORING_EXAMPLE, "Monitoring updated"),
+        **R404,
+        **COMMON,
+    },
+)
+def patch_dashboard_monitoring(
     monitoring_id: str,
-    payload: JobLinkRequest,
+    payload: MonitoringPatch,
     db: Session = Depends(get_db),
     api_key: str = Depends(verify_api_key),
-) -> RPADashboardMonitoringResponse:
-    return rpa_dashboard_service.link_job(db, id_beecker, monitoring_id, payload)
+):
+    return rpa_dashboard_service.patch_dashboard_monitoring(db, monitoring_id, payload)
 
 
-@router.delete(
-    "/{id_beecker}/monitoring/{monitoring_id}/job",
-    response_model=RPADashboardMonitoringResponse,
-    summary="Desvincular job del monitoring",
-    description="Desvincula el job sin eliminarlo. Limpia bot_id y monitoring_id de job_kwargs.",
-)
-def unlink_job(
-    id_beecker: str,
-    monitoring_id: str,
-    db: Session = Depends(get_db),
-    api_key: str = Depends(verify_api_key),
-) -> RPADashboardMonitoringResponse:
-    return rpa_dashboard_service.unlink_job(db, id_beecker, monitoring_id)
-
-
-# ── BusinessErrors ────────────────────────────────────────────────────────────
-
-@router.post(
-    "/{id_beecker}/business-errors",
-    response_model=BusinessErrorResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Agregar error de negocio",
-)
-def create_business_error(
-    id_beecker: str,
-    payload: BusinessErrorCreate,
-    db: Session = Depends(get_db),
-    api_key: str = Depends(verify_api_key),
-) -> BusinessErrorResponse:
-    return rpa_dashboard_service.create_business_error(db, id_beecker, payload)
-
-
-@router.get(
-    "/{id_beecker}/business-errors",
-    response_model=list[BusinessErrorResponse],
-    summary="Listar errores de negocio del bot",
-)
-def list_business_errors(
-    id_beecker: str,
-    db: Session = Depends(get_db),
-    api_key: str = Depends(verify_api_key),
-) -> list[BusinessErrorResponse]:
-    return rpa_dashboard_service.list_business_errors(db, id_beecker)
-
-
-@router.delete(
-    "/{id_beecker}/business-errors/{error_id}",
+@dashboard_router.delete(
+    "/monitoring/{monitoring_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Eliminar error de negocio",
+    summary="Delete Dashboard monitoring",
+    description=(
+        "Deletes the monitoring. If it has a linked job, "
+        "it removes it from APScheduler and deletes it in cascade."
+    ),
+    responses={
+        **R204,
+        **R404,
+        **COMMON,
+    },
 )
-def delete_business_error(
-    id_beecker: str,
-    error_id: str,
+def delete_dashboard_monitoring(
+    monitoring_id: str,
     db: Session = Depends(get_db),
     api_key: str = Depends(verify_api_key),
-) -> None:
-    rpa_dashboard_service.delete_business_error(db, id_beecker, error_id)
+):
+    rpa_dashboard_service.delete_dashboard_monitoring(db, monitoring_id)
+
+
+@uipath_router.post(
+    "/",
+    response_model=AtomicCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create UiPath bot (atomic)",
+    description=(
+        "Creates in a single transaction: client (or reuses existing), UiPath bot, "
+        "monitoring and job (paused). If the bot already exists by uipath_robot_name, it is reused."
+    ),
+    responses={
+        **R201(_ATOMIC_CREATE_EXAMPLE, "Bot and monitoring created successfully"),
+        **COMMON,
+    },
+)
+def create_rpa_uipath(
+    payload: RPAUiPathAtomicCreate,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key),
+):
+    return rpa_dashboard_service.create_rpa_uipath_atomic(db, payload)
+
+
+@uipath_router.get(
+    "/",
+    response_model=list[RPAUiPathResponse],
+    summary="List UiPath bots",
+    responses={
+        **R200_list([_UIPATH_BOT_EXAMPLE], "List of registered UiPath bots"),
+        **COMMON,
+    },
+)
+def list_rpa_uipath(
+    db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key),
+):
+    return rpa_dashboard_service.list_rpa_uipath(db)
+
+
+@uipath_router.get(
+    "/monitoring",
+    response_model=list[MonitoringResponse],
+    summary="List all UiPath monitorings with job info",
+    description="Returns all rpa_uipath_monitoring records with the nested job.",
+    responses={
+        **R200_list([_MONITORING_EXAMPLE], "List of monitorings with jobs"),
+        **COMMON,
+    },
+)
+def list_uipath_monitoring(
+    db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key),
+):
+    return rpa_dashboard_service.list_uipath_monitoring(db)
+
+
+@uipath_router.get(
+    "/{robot_name}/errors",
+    response_model=list[str],
+    summary="List business errors of the UiPath bot",
+    responses={
+        **R200_str_list(
+            ["Business Rule Violation"],
+            "List of configured business errors",
+        ),
+        **R404,
+        **COMMON,
+    },
+)
+def list_uipath_errors(
+    robot_name: str,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key),
+):
+    return rpa_dashboard_service.list_uipath_errors(db, robot_name)
+
+
+@uipath_router.patch(
+    "/monitoring/{monitoring_id}",
+    response_model=MonitoringResponse,
+    summary="Update UiPath monitoring",
+    description="Updates the channel, flags, agents and transactional unit of the monitoring.",
+    responses={
+        **R200(_MONITORING_EXAMPLE, "Monitoring updated"),
+        **R404,
+        **COMMON,
+    },
+)
+def patch_uipath_monitoring(
+    monitoring_id: str,
+    payload: MonitoringPatch,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key),
+):
+    return rpa_dashboard_service.patch_uipath_monitoring(db, monitoring_id, payload)
+
+
+@uipath_router.delete(
+    "/monitoring/{monitoring_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete UiPath monitoring",
+    description=(
+        "Deletes the monitoring. If it has a linked job, "
+        "it removes it from APScheduler and deletes it in cascade."
+    ),
+    responses={
+        **R204,
+        **R404,
+        **COMMON,
+    },
+)
+def delete_uipath_monitoring(
+    monitoring_id: str,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key),
+):
+    rpa_dashboard_service.delete_uipath_monitoring(db, monitoring_id)

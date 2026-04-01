@@ -72,10 +72,6 @@ class Job(Base):
         back_populates="job"
     )
 
-    agent_monitoring: Mapped["AgentMonitoring"] = relationship(
-        back_populates="job"
-    )
-
     executions: Mapped[list["JobExecution"]] = relationship(
         back_populates="job",
         cascade="all, delete-orphan"

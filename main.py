@@ -1,26 +1,33 @@
+"""
+main.py
+========
+Main script: Launches the FastAPI service, includes all routes, origins, methods, etc.
+"""
+
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.routes import router
 from app.core.scheduler import start_scheduler, stop_scheduler
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
+from app.core.logger import setup_logging
+from app.middlewares.observability import observability_middleware
+
+setup_logging()
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Startup ───────────────────────────────────────────────────────────────
-    logger.info("🚀 Starting application...")
+    logger.info("▶  Starting application...")
     start_scheduler()
+    
     yield
-    # ── Shutdown ──────────────────────────────────────────────────────────────
-    logger.info("🛑 Stopping application...")
+    
+    logger.info("⏹  Stopping application...")
     stop_scheduler()
 
 app = FastAPI(
@@ -37,5 +44,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(BaseHTTPMiddleware, dispatch=observability_middleware)
 
 app.include_router(router.router)

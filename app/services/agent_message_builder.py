@@ -440,4 +440,4 @@ class AgentMessageBuilder:
                 return str(identifier)
 
         run_id = execution.get("run_id")
-        return f"#{run_id}" if run_id is not None else "(ID desconocido)"
+        return f"No. {run_id}" if run_id is not None else "(ID desconocido)"
