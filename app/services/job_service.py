@@ -66,53 +66,41 @@ def _wrapped_task(job_id: str, task_path: str, **kwargs):
     Wraps the actual job function to register execution history.
     This is the function that APScheduler actually executes.
     """
-    db: Session = SessionLocal()
-    started_at = datetime.now(timezone.utc)
+    db = SessionLocal()
     execution = JobExecution(
         job_id=job_id,
         status=ExecutionStatus.running,
-        started_at=started_at,
+        started_at=datetime.now(timezone.utc),
     )
     db.add(execution)
     db.commit()
-    db.refresh(execution)
 
+    start = datetime.now(timezone.utc)
     try:
         func = _resolve_func(task_path)
-        output = func(job_id=job_id, **kwargs)
-        finished_at = datetime.now(timezone.utc)
-        duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+        result = func(job_id=job_id, **kwargs)
 
+        elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
         execution.status = ExecutionStatus.success
-        execution.finished_at = finished_at
-        execution.duration_ms = duration_ms
-        execution.output = str(output) if output is not None else None
-        logger.info(f"✅ Job [{job_id}] executed in {duration_ms}ms")
+        execution.result = str(result)[:500] if result else None
+        execution.finished_at = datetime.now(timezone.utc)
+        db.commit()
 
-    except Exception as exc:
-        finished_at = datetime.now(timezone.utc)
-        duration_ms = int((finished_at - started_at).total_seconds() * 1000)
-        execution.status = ExecutionStatus.failure
-        execution.finished_at = finished_at
-        execution.duration_ms = duration_ms
-        execution.error = str(exc)
-        logger.error(f"❌ Job [{job_id}] failed: {exc}")
+        logger.info(f"✅ Job [{job_id}] executed in {elapsed_ms}ms")
+        return result
+
+    except Exception as e:
+        elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
+        execution.status = ExecutionStatus.failed
+        execution.error = str(e)[:500]
+        execution.finished_at = datetime.now(timezone.utc)
+        db.commit()
+
+        logger.error(f"❌ Job [{job_id}] failed in {elapsed_ms}ms: {e}")
+        raise
 
     finally:
-        try:
-            aps_job = scheduler.get_job(job_id)
-            job_record = db.get(Job, job_id)
-            if job_record:
-                job_record.next_run_time = (
-                    aps_job.next_run_time if aps_job else None
-                )
-                if aps_job is None and job_record.trigger_type == TriggerType.date:
-                    job_record.status = JobStatus.completed
-            db.commit()
-        except Exception as e:
-            logger.warning(f"Failed to update next_run_time: {e}")
-        finally:
-            db.close()
+        db.close()
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
@@ -274,8 +262,11 @@ def activate_observa_job(
     Agrega run_id a la lista de ejecuciones activas del job bee_observa
     y lo reanuda si estaba pausado.
 
+    job_kwargs resultante: { bot_id, monitoring_id, run_ids: [...] }
+    run_id individual NO se persiste en job_kwargs ni en APScheduler kwargs.
+
     Soporta múltiples ejecuciones simultáneas: cada llamada agrega un run_id
-    a `job_kwargs["run_ids"]`. El job solo se pausa cuando la lista queda vacía.
+    a job_kwargs["run_ids"]. El job solo se pausa cuando la lista queda vacía.
 
     Returns:
         True  → run_id agregado correctamente.
@@ -285,7 +276,6 @@ def activate_observa_job(
     if not db_job:
         raise RuntimeError(f"Job {job_id} no encontrado en la BD")
 
-    # Obtener lista actual de run_ids activos
     existing_run_ids: list[str] = db_job.job_kwargs.get("run_ids", [])
 
     if run_id in existing_run_ids:
@@ -294,19 +284,16 @@ def activate_observa_job(
         )
         return False
 
-    # Agregar el nuevo run_id
     new_run_ids = existing_run_ids + [run_id]
-    new_kwargs = {
-        **db_job.job_kwargs,
-        "run_ids": new_run_ids,
-        "run_id": run_id,  # compatibilidad con la task actual
-    }
+
+    # Construir kwargs limpios — sin run_id individual, nunca
+    new_kwargs = {k: v for k, v in db_job.job_kwargs.items() if k != "run_id"}
+    new_kwargs["run_ids"] = new_run_ids
     if monitoring_id:
         new_kwargs["monitoring_id"] = monitoring_id
 
     db_job.job_kwargs = new_kwargs
 
-    # Actualizar kwargs en APScheduler
     aps_job = scheduler.get_job(job_id)
     if aps_job:
         aps_job.modify(kwargs={
@@ -315,7 +302,6 @@ def activate_observa_job(
             **new_kwargs,
         })
 
-    # Reanudar solo si estaba pausado
     if db_job.status != JobStatus.active:
         aps_job = scheduler.resume_job(job_id)
         db_job.status = JobStatus.active
@@ -325,7 +311,7 @@ def activate_observa_job(
     db.refresh(db_job)
     logger.info(
         f"🟢 [OBSERVA] run_id agregado | job_id={job_id} | "
-        f"run_id={run_id} | run_ids_activos={new_run_ids} | monitoring_id={monitoring_id}"
+        f"run_ids_activos={new_run_ids} | monitoring_id={monitoring_id}"
     )
     return True
 
@@ -334,38 +320,40 @@ def pause_observa_job(
     db: Session,
     job_id: str,
     finished_run_id: str | None = None,
-) -> None:
+) -> bool:
     """
     Elimina finished_run_id de la lista activa del job bee_observa.
     Solo pausa el job cuando la lista queda completamente vacía.
 
+    job_kwargs resultante: { bot_id, monitoring_id, run_ids: [...restantes] }
+    run_id individual NUNCA se escribe.
+
     Args:
         db:              Sesión de BD.
         job_id:          ID del job a gestionar.
-        finished_run_id: run_id que terminó. Si es None, fuerza pausa inmediata
-                         (comportamiento de emergencia / compatibilidad).
+        finished_run_id: run_id que terminó. Si es None, fuerza pausa inmediata.
+
+    Returns:
+        True  → lista vacía, job pausado.
+        False → aún quedan run_ids activos, job continúa.
     """
     db_job = db.get(Job, job_id)
     if not db_job:
         logger.warning(f"⚠️ [OBSERVA] Job {job_id} no encontrado al intentar pausar")
-        return
+        return True  # asumir pausado para no bloquear el flujo
 
     current_run_ids: list[str] = db_job.job_kwargs.get("run_ids", [])
 
-    # Remover el run_id que terminó
-    if finished_run_id and finished_run_id in current_run_ids:
-        remaining = [r for r in current_run_ids if r != finished_run_id]
-    else:
-        remaining = current_run_ids
+    remaining = (
+        [r for r in current_run_ids if r != finished_run_id]
+        if finished_run_id
+        else []
+    )
 
     if remaining:
-        # Aún hay ejecuciones activas — actualizar lista pero NO pausar
-        # El run_id activo para la task es el primero de la lista restante
-        new_kwargs = {
-            **db_job.job_kwargs,
-            "run_ids": remaining,
-            "run_id": remaining[0],
-        }
+        # Aún hay ejecuciones activas — actualizar lista, sin run_id individual
+        new_kwargs = {k: v for k, v in db_job.job_kwargs.items() if k != "run_id"}
+        new_kwargs["run_ids"] = remaining
         db_job.job_kwargs = new_kwargs
 
         aps_job = scheduler.get_job(job_id)
@@ -378,12 +366,12 @@ def pause_observa_job(
 
         db.commit()
         logger.info(
-            f"🔄 [OBSERVA] run_id={finished_run_id} terminado, "
+            f"🔄 [OBSERVA] run_id={finished_run_id} removido, "
             f"siguen activos: {remaining} | job_id={job_id}"
         )
-        return
+        return False  # job NO pausado
 
-    # Lista vacía → pausar y limpiar kwargs
+    # Lista vacía → limpiar kwargs y pausar
     clean_kwargs = {
         k: v for k, v in db_job.job_kwargs.items()
         if k not in ("run_id", "run_ids")
@@ -405,6 +393,7 @@ def pause_observa_job(
 
     db.commit()
     logger.info(
-        f"⏸ [OBSERVA] Todos los run_ids terminaron, job pausado | "
+        f"⏸ [OBSERVA] Lista vacía, job pausado | "
         f"job_id={job_id} | último_run_id={finished_run_id}"
     )
+    return True  # job pausado

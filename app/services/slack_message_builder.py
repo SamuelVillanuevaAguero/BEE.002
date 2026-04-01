@@ -222,12 +222,12 @@ class _BaseMessageBuilder:
         details = []
         if failed > 0:
             unit_f = unit_singular if failed == 1 else unit_plural
-            details.append(f"{failed} {unit_f} fallido{'s' if failed != 1 else ''}")
+            details.append(f"*➤ {failed} {unit_f}* `failed` ")
         if pending > 0:
             unit_p = unit_singular if pending == 1 else unit_plural
-            details.append(f"{pending} {unit_p} pendiente{'s' if pending != 1 else ''}")
+            details.append(f"*➤ {pending} {unit_p}* `new` ")
         if details:
-            lines.append(f"  ({' · '.join(details)})")
+            lines.append(f"{'\n'.join(details)}")
 
         return lines
 
@@ -293,7 +293,7 @@ class HappyPathBuilder(_BaseMessageBuilder):
 
         if pending > 0:
             unit_p = ctx.transaction_unit_singular if pending == 1 else ctx.transaction_unit
-            lines.append(f"  ({pending} {unit_p} pendiente{'s' if pending != 1 else ''})")
+            lines.append(f"*➤ {pending} {unit_p}* `new` ")
 
         lines.append("Sin errores reportados.")
         lines.append(self._timing_info(ctx.status))

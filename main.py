@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("▶  Starting application...")
+    
     start_scheduler()
     
     yield

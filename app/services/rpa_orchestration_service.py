@@ -19,6 +19,13 @@ Resolution:
 
     _load_relation_by_monitoring_id(db, monitoring_id)
         → loads ONE specific record by its PK (used by the scheduler)
+
+job_kwargs schema (bee_observa):
+    {
+        "bot_id":        "MME.001",       ← id_beecker
+        "monitoring_id": "<uuid>",
+        "run_ids":       ["165834", ...]  ← lista canónica; run_id individual eliminado
+    }
 """
 
 import asyncio
@@ -107,6 +114,19 @@ def _build_config(relation: RPADashboardMonitoring) -> RPAConfig:
     )
 
 
+def _get_manage_flags(relation: RPADashboardMonitoring) -> tuple[bool, bool]:
+    """
+    Extrae start_active y end_active de manage_flags.
+    Defaults: start_active=True, end_active=True.
+    """
+    flags = relation.manage_flags or {}
+    start_active = flags.get("start_active", True)
+    end_active = flags.get("end_active", True)
+    return bool(start_active), bool(end_active)
+
+
+# ── Resolve run_id automático (bee_informa) ───────────────────────────────────
+
 async def _resolve_latest_run_id(config: RPAConfig) -> str:
     """
     Resuelve el run_id más reciente para un bot.
@@ -137,7 +157,7 @@ async def _resolve_latest_run_id(config: RPAConfig) -> str:
     return run_id
 
 
-# ── Dispatch: status fusionado para N run_ids ─────────────────────────────────
+# ── Dispatch: status fusionado para N run_ids (bee_observa) ──────────────────
 
 async def _dispatch_status_multi(
     db: Session,
@@ -192,6 +212,8 @@ async def _dispatch_status_multi(
     return run_states
 
 
+# ── Dispatch: status individual (bee_informa / fallback) ─────────────────────
+
 async def _dispatch_status_single(
     config: RPAConfig,
     run_id: str,
@@ -199,7 +221,7 @@ async def _dispatch_status_single(
 ) -> str | None:
     """
     Envía el status de UNA ejecución al canal Slack.
-    Usado por bee_informa (sin run_ids inyectados) y por _finalize_observa.
+    Usado por bee_informa (sin run_ids inyectados) y como fallback de _finalize_observa.
     """
     try:
         monitoring = MonitoringAgent()
@@ -222,6 +244,8 @@ async def _dispatch_status_single(
         )
         raise
 
+
+# ── Retry para ejecuciones END que aún no aparecen en Beecker ────────────────
 
 async def _retry_execution_end(config: RPAConfig, run_id: str, monitoring_id: str) -> None:
     for attempt, delay in enumerate(_RETRY_DELAYS_SECONDS, start=1):
@@ -261,6 +285,8 @@ async def _retry_execution_end(config: RPAConfig, run_id: str, monitoring_id: st
     )
 
 
+# ── Handlers de inicio ────────────────────────────────────────────────────────
+
 async def _handle_start_one(
     db: Session,
     relation: RPADashboardMonitoring,
@@ -269,19 +295,26 @@ async def _handle_start_one(
     """
     Procesa el inicio de una ejecución para UN registro de monitoring.
 
-    - Envía el mensaje de inicio (siempre, con el #run_id incluido).
+    - Respeta manage_flags.start_active: si es False, omite el mensaje de inicio.
     - Para bee_observa: agrega run_id a la lista del job (o reanuda si estaba pausado).
     """
     config = _build_config(relation)
+    start_active, _ = _get_manage_flags(relation)
 
-    monitoring = MonitoringAgent()
-    await monitoring.load_config(config)
-    await monitoring.send_initial_rpa(bot_id=config.id_dashboard, run_id=run_id)
-    logger.info(
-        f"✅ [START] Mensaje de inicio enviado | run_id={run_id} | "
-        f"bot_name={config.bot_name} | channel={config.channel_name} | "
-        f"monitoring_id={relation.id}"
-    )
+    if start_active:
+        monitoring = MonitoringAgent()
+        await monitoring.load_config(config)
+        await monitoring.send_initial_rpa(bot_id=config.id_dashboard, run_id=run_id)
+        logger.info(
+            f"✅ [START] Mensaje de inicio enviado | run_id={run_id} | "
+            f"bot_name={config.bot_name} | channel={config.channel_name} | "
+            f"monitoring_id={relation.id}"
+        )
+    else:
+        logger.info(
+            f"⏭ [START] start_active=False, mensaje omitido | run_id={run_id} | "
+            f"bot_name={config.bot_name} | monitoring_id={relation.id}"
+        )
 
     if relation.monitor_type == MonitorType.bee_observa:
         await _activate_observa(db=db, relation=relation, run_id=run_id)
@@ -294,15 +327,44 @@ async def _handle_end_one(
     relation: RPADashboardMonitoring,
     run_id: str,
 ) -> None:
-    """Procesa el fin de una ejecución para UN registro de monitoring."""
+    """
+    Procesa el fin de una ejecución para UN registro de monitoring.
+
+    - bee_observa: envía mensaje fusionado con todos los run_ids activos.
+    - bee_informa: envía mensaje individual con retry si aún no está disponible.
+    - Respeta manage_flags.end_active: bee_observa lo usa para omitir
+      el mensaje final cuando la lista de run_ids queda vacía.
+    """
     config = _build_config(relation)
+    _, end_active = _get_manage_flags(relation)
 
     if relation.monitor_type == MonitorType.bee_observa:
-        await _finalize_observa(db=db, relation=relation, run_id=run_id, config=config)
+        await _finalize_observa(
+            db=db,
+            relation=relation,
+            run_id=run_id,
+            config=config,
+            end_active=end_active,
+        )
     else:
-        # bee_informa: mensaje individual con run_id
-        await _dispatch_status_single(config=config, run_id=run_id, monitoring_id=relation.id)
+        # bee_informa: mensaje individual
+        try:
+            await _dispatch_status_single(
+                config=config,
+                run_id=run_id,
+                monitoring_id=relation.id,
+            )
+        except RunNotYetAvailableError:
+            asyncio.create_task(
+                _retry_execution_end(
+                    config=config,
+                    run_id=run_id,
+                    monitoring_id=relation.id,
+                )
+            )
 
+
+# ── Lógica interna bee_observa ────────────────────────────────────────────────
 
 async def _activate_observa(
     db: Session,
@@ -341,14 +403,17 @@ async def _finalize_observa(
     relation: RPADashboardMonitoring,
     run_id: str,
     config: RPAConfig,
+    end_active: bool = True,
 ) -> None:
     """
     Maneja el fin de una ejecución en bee_observa.
 
     1. Lee todos los run_ids activos del job (incluido el que acaba de terminar).
     2. Envía UN mensaje fusionado con el estado de todas (terminadas + en progreso).
-    3. Llama a pause_observa_job para remover run_id de la lista.
+    3. _dispatch_status_multi llama a pause_observa_job para remover los terminados.
        Si la lista queda vacía, el job se pausa.
+
+    Si end_active=False: pausa el job pero NO envía el mensaje Slack final.
 
     Si el job ya está pausado (el scheduler llegó primero y procesó el estado terminal),
     se omite para evitar duplicados.
@@ -370,22 +435,46 @@ async def _finalize_observa(
                 )
                 return
 
-            # Enviar mensaje fusionado con TODOS los run_ids activos
-            # (incluyendo el que acaba de terminar, para mostrar su estado final)
             if current_run_ids:
-                await _dispatch_status_multi(
-                    db=db,
-                    config=config,
-                    run_ids=current_run_ids,
-                    monitoring_id=relation.id,
-                    job_id=job_id,
-                )
-                # _dispatch_status_multi ya llamó pause_observa_job para run_id
+                if end_active:
+                    # Enviar mensaje fusionado con TODOS los run_ids activos
+                    # (incluyendo el que acaba de terminar, para mostrar su estado final)
+                    await _dispatch_status_multi(
+                        db=db,
+                        config=config,
+                        run_ids=current_run_ids,
+                        monitoring_id=relation.id,
+                        job_id=job_id,
+                    )
+                    # _dispatch_status_multi ya llamó pause_observa_job para los terminados
+                else:
+                    # end_active=False: solo remover el run_id del job, sin mensaje Slack
+                    logger.info(
+                        f"⏭ [OBSERVA] end_active=False, mensaje omitido | "
+                        f"run_id={run_id} | monitoring_id={relation.id}"
+                    )
+                    job_service.pause_observa_job(db, job_id, run_id)
                 return
 
     # Fallback: no hay job configurado, enviar mensaje individual
-    await _dispatch_status_single(config=config, run_id=run_id, monitoring_id=relation.id)
+    if end_active:
+        try:
+            await _dispatch_status_single(
+                config=config,
+                run_id=run_id,
+                monitoring_id=relation.id,
+            )
+        except RunNotYetAvailableError:
+            asyncio.create_task(
+                _retry_execution_end(
+                    config=config,
+                    run_id=run_id,
+                    monitoring_id=relation.id,
+                )
+            )
 
+
+# ── Entry points públicos ─────────────────────────────────────────────────────
 
 async def handle_execution_start(db: Session, run_id: str, bot_id: str) -> None:
     """
@@ -393,7 +482,7 @@ async def handle_execution_start(db: Session, run_id: str, bot_id: str) -> None:
     bot_id = id_dashboard numérico (ej: "114").
 
     - Envía mensaje de inicio con #run_id para CADA configuración de monitoring.
-    - Para bee_observa: agrega run_id a la lista del job (o reanuda si era el primero).
+    - Para bee_observa: agrega run_id a run_ids del job (o reanuda si era el primero).
     """
     logger.info(f"🐝 [START] id_dashboard={bot_id} | run_id={run_id}")
 
@@ -457,7 +546,7 @@ async def send_rpa_status(
     bot_id        = id_beecker ("AEC.001")
     job_id        = ID del job APScheduler (necesario para pause_observa_job)
     run_ids       = lista de run_ids activos inyectada por activate_observa_job.
-                    None → resolución automática del run_id más reciente (bee_informa).
+                    None / vacío → resolución automática del run_id más reciente (bee_informa).
     monitoring_id = PK del registro en rpa_dashboard_monitoring.
     """
     logger.info(
