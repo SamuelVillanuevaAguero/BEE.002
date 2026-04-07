@@ -86,6 +86,35 @@ class _ErrorMessages:
 
         return "\n".join(lines)
 
+# ── Business error filter ──────────────────────────────────────────────────
+def _is_business_error(description: str, patterns: List[str]) -> bool:
+    """Return True if *description* contains at least one business-error pattern (case-insensitive)."""
+    desc_lower = description.lower()
+    return any(p.lower() in desc_lower for p in patterns)
+
+
+def _should_suppress_mentions(error_groups: List[dict], business_error_patterns: List[str]) -> bool:
+    """
+    Return True (suppress ROC tag) when ALL error groups are business errors.
+
+    Rules:
+    - If there are no error groups → do NOT suppress (keep mentions for CRITICAL_FAILURE).
+    - If business_error_patterns is empty → never suppress.
+    - Opción A: suppress only when every single group matches a business pattern.
+
+    The 'representative' key is produced by BeeckerAPI._group_errors().
+    Falls back to 'description' for backwards compatibility.
+    """
+    if not business_error_patterns or not error_groups:
+        return False
+
+    return all(
+        _is_business_error(
+            g.get("representative", g.get("description", "")),
+            business_error_patterns,
+        )
+        for g in error_groups
+    )
 
 # ── MonitoringAgent ───────────────────────────────────────────────────────────
 
@@ -336,7 +365,21 @@ class MonitoringAgent:
             if not config.enable_overtime_check:
                 status = {**status, "overtime_flag": False}
 
-            # 3. Construir mensaje
+            # 3. Calcular si se deben suprimir los tags (todos los errores son de negocio)
+            error_groups = status.get("error_groups", [])
+            effective_mentions = (
+                []
+                if _should_suppress_mentions(error_groups, config.business_errors)
+                else self._mention_ids
+            )
+            if not effective_mentions and self._mention_ids:
+                logger.info(
+                    f"🔕 [MENTIONS] Tag suprimido — todos los errores son de negocio | "
+                    f"run_id={run_id} | bot_id={bot_id} | "
+                    f"grupos={[g.get('representative', g.get('description', '')) for g in error_groups]}"
+                )
+
+            # 4. Construir mensaje
             message = self._rpa_message_builder.build(
                 bot_id=config.bot_name,
                 bot_name=config.process_name,
@@ -345,11 +388,11 @@ class MonitoringAgent:
                 transaction_unit_singular=config.transaction_unit_singular,
                 show_error_groups=config.show_error_groups,
                 max_error_groups=config.max_error_groups,
-                mention_user_ids=self._mention_ids,
+                mention_user_ids=effective_mentions,
                 freshdesk_url=self._get_effective_freshdesk_url(),
             )
 
-            # 4. Enviar mensaje de texto
+            # 5. Enviar mensaje de texto
             await self.__api_slack.send_message(
                 channel_name=config.channel_name,
                 message=message,
@@ -359,7 +402,7 @@ class MonitoringAgent:
                 f"en canal {config.channel_name}."
             )
 
-            # 5. Gráfica — solo si la ejecución finalizó y el flag está activo
+            # 6. Gráfica — solo si la ejecución finalizó y el flag está activo
             run_state = (status.get("run_state") or "").lower().strip()
             if config.enable_chart and run_state not in _RPA_IN_PROGRESS_STATES:
                 await self._send_rpa_chart(status=status, config=config)
@@ -431,7 +474,21 @@ class MonitoringAgent:
                 )
                 return {}
 
-            # 2. Construir mensaje fusionado (un saludo + N bloques en orden cronológico)
+            # 2. Calcular si se deben suprimir los tags (todos los errores de todos
+            #    los status son de negocio)
+            all_error_groups = [g for s in status_list for g in s.get("error_groups", [])]
+            effective_mentions = (
+                []
+                if _should_suppress_mentions(all_error_groups, config.business_errors)
+                else self._mention_ids
+            )
+            if not effective_mentions and self._mention_ids:
+                logger.info(
+                    f"🔕 [MENTIONS] Tag suprimido — todos los errores son de negocio | "
+                    f"run_ids={run_ids} | bot_id={bot_id}"
+                )
+
+            # 3. Construir mensaje fusionado (un saludo + N bloques en orden cronológico)
             message = self._rpa_message_builder.build_multi(
                 bot_id=config.bot_name,
                 bot_name=config.process_name,
@@ -440,11 +497,11 @@ class MonitoringAgent:
                 transaction_unit_singular=config.transaction_unit_singular,
                 show_error_groups=config.show_error_groups,
                 max_error_groups=config.max_error_groups,
-                mention_user_ids=self._mention_ids,
+                mention_user_ids=effective_mentions,
                 freshdesk_url=self._get_effective_freshdesk_url(),
             )
 
-            # 3. Enviar mensaje
+            # 4. Enviar mensaje
             await self.__api_slack.send_message(
                 channel_name=config.channel_name,
                 message=message,
@@ -454,14 +511,14 @@ class MonitoringAgent:
                 f"canal={config.channel_name}."
             )
 
-            # 4. Gráfica — solo para ejecuciones terminadas
+            # 5. Gráfica — solo para ejecuciones terminadas
             if config.enable_chart:
                 for status_dict in status_list:
                     run_state_s = (status_dict.get("run_state") or "").lower().strip()
                     if run_state_s not in _RPA_IN_PROGRESS_STATES:
                         await self._send_rpa_chart(status=status_dict, config=config)
 
-            # 5. Retornar mapa {str(run_id): run_state}
+            # 6. Retornar mapa {str(run_id): run_state}
             return {
                 str(s["run_id"]): (s.get("run_state") or "").lower().strip()
                 for s in status_list
@@ -474,7 +531,6 @@ class MonitoringAgent:
                 traceback_str=tb.format_exc(),
             )
             raise
-
     # ── Public Agent methods ────────────────────────────────────────────────
 
     async def send_status_agent(

@@ -88,6 +88,13 @@ class RPAConfig:
 
     enable_chart:
         If True, generate and send a PNG chart as an image attachment in Slack.
+    
+    business_errors:
+        List of business error patterns (substrings) configured for this bot.
+        When ALL error groups in an execution match at least one pattern
+        (case-insensitive substring match), the ROC agents are NOT mentioned
+        in the Slack message, even though the error groups are still shown.
+        An empty list means every error triggers a mention.
 
     email_dash:
         Authentication email used to access the Beecker Dashboard.
@@ -136,6 +143,9 @@ class RPAConfig:
     enable_overtime_check: bool = False
     enable_freshdesk_link: bool = True
     enable_chart: bool = False
+
+    business_errors: List[str] = field(default_factory=list)
+
 
     # ── Beecker credentials ─────────────────────────────────────────────────────
     email_dash: str = os.getenv("BEECKER_EMAIL", "")

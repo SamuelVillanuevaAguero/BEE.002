@@ -170,6 +170,7 @@ def _build_config(relation: RPADashboardMonitoring) -> RPAConfig:
         show_error_groups=flags["show_error_groups"],
         # FreshDesk
         freshdesk_company_id=freshdesk_company_id,
+        business_errors=rpa.business_errors or [],
     )
 
 

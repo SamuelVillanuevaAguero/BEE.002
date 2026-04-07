@@ -217,7 +217,7 @@ class _BaseMessageBuilder:
 
         unit = unit_plural if total != 1 else unit_singular
 
-        lines = [f"Se han procesado *{completed}* de *{total}* {unit}."]
+        lines = [f"Se han procesado *{completed}* de *{total}* {unit} :white_check_mark:" if completed > 0 else ""]
 
         details = []
         if failed > 0:
@@ -335,6 +335,10 @@ class PartialFailureBuilder(_BaseMessageBuilder):
             self._timing_info(status),
         ]
 
+        mention = self._mentions_line(ctx.mention_user_ids)
+        if mention:
+            lines.extend(["", mention])
+
         freshdesk = self._freshdesk_line(ctx.freshdesk_url)
         if freshdesk:
             lines.extend(["", freshdesk])
@@ -447,6 +451,10 @@ class OvertimeBuilder(_BaseMessageBuilder):
         ]
 
         if failed > 0:
+            mention = self._mentions_line(ctx.mention_user_ids)
+            if mention:
+                lines.extend(["", mention])
+
             freshdesk = self._freshdesk_line(ctx.freshdesk_url)
             if freshdesk:
                 lines.extend(["", freshdesk])
