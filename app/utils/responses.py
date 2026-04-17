@@ -18,8 +18,6 @@ from __future__ import annotations
 from typing import Any
 
 
-# ── Schemas de error base ─────────────────────────────────────────────────────
-
 _ERROR_SCHEMA = {
     "type": "object",
     "properties": {
@@ -45,11 +43,9 @@ _VALIDATION_SCHEMA = {
 }
 
 
-# ── Error codes ─────────────────────────────────────────────────────────────
-
 R401: dict[int, Any] = {
     401: {
-        "description": "API Key inválida o ausente",
+        "description": "Invalid or missing API Key",
         "content": {
             "application/json": {
                 "schema": _ERROR_SCHEMA,
@@ -61,11 +57,11 @@ R401: dict[int, Any] = {
 
 R404: dict[int, Any] = {
     404: {
-        "description": "Recurso no encontrado",
+        "description": "Resource not found",
         "content": {
             "application/json": {
                 "schema": _ERROR_SCHEMA,
-                "example": {"detail": "El recurso solicitado no existe."},
+                "example": {"detail": "The requested resource does not exist."},
             }
         },
     }
@@ -73,7 +69,7 @@ R404: dict[int, Any] = {
 
 R422: dict[int, Any] = {
     422: {
-        "description": "Error de validación en el payload",
+        "description": "Validation error in payload",
         "content": {
             "application/json": {
                 "schema": _VALIDATION_SCHEMA,
@@ -93,7 +89,7 @@ R422: dict[int, Any] = {
 
 R500: dict[int, Any] = {
     500: {
-        "description": "Error interno del servidor",
+        "description": "Internal server error",
         "content": {
             "application/json": {
                 "schema": _ERROR_SCHEMA,
@@ -103,18 +99,14 @@ R500: dict[int, Any] = {
     }
 }
 
-# No content (successful DELETE)
 R204: dict[int, Any] = {
     204: {
-        "description": "Eliminado exitosamente (sin contenido)",
+        "description": "Successfully deleted (no content)",
     }
 }
 
-# Common groupings
 COMMON: dict[int, Any] = {**R401, **R422, **R500}
 
-
-# ── Helpers for success status codes with inline example ───────────────────
 
 def R200(example: Any, description: str = "OK") -> dict[int, Any]:
     """200 response with example object."""

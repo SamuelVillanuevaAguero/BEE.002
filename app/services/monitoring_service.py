@@ -309,7 +309,7 @@ class MonitoringAgent:
 
         Args:
             bot_id:  id_dashboard del bot (para logs).
-            run_id:  Identificador numérico de la ejecución (ej: "100036").
+            run_id:  Numeric execution identifier (e.g: "100036").
 
         Args:
             bot_id: Numeric dashboard ID used for logging.
@@ -320,7 +320,7 @@ class MonitoringAgent:
         """
         try:
             if self.__rpa_config is None or self.__api_beecker is None:
-                raise RuntimeError("Debes llamar a load_config() antes de send_initial_rpa().")
+                raise RuntimeError("You must call load_config() before send_initial_rpa().")
 
             message = self._rpa_message_builder.build_initial(
                 bot_id=self.__rpa_config.bot_name,
@@ -354,22 +354,23 @@ class MonitoringAgent:
         """
         try:
             if self.__rpa_config is None or self.__api_beecker is None:
-                raise RuntimeError("Debes llamar a load_config() antes de send_status_rpa().")
+                raise RuntimeError("You must call load_config() before send_status_rpa().")
 
             config = self.__rpa_config
 
-            # 1. Obtener status completo desde Beecker
+            # 1. Get full status from Beecker
             status = await self.__api_beecker.get_rpa_status(run_id=run_id, bot_id=bot_id)
 
-            # 2. Aplicar flag de overtime
+            # 2. Apply overtime flag
             if not config.enable_overtime_check:
                 status = {**status, "overtime_flag": False}
 
-            # 3. Calcular si se deben suprimir los tags (todos los errores son de negocio)
+            # 3. Calculate if tags should be suppressed (all errors are business)
             error_groups = status.get("error_groups", [])
             effective_mentions = (
                 []
-                if _should_suppress_mentions(error_groups, config.business_errors)
+                if (not config.enable_tag_agents or
+                    _should_suppress_mentions(error_groups, config.business_errors))
                 else self._mention_ids
             )
             if not effective_mentions and self._mention_ids:
@@ -379,7 +380,7 @@ class MonitoringAgent:
                     f"grupos={[g.get('representative', g.get('description', '')) for g in error_groups]}"
                 )
 
-            # 4. Construir mensaje
+            # 4. Build message
             message = self._rpa_message_builder.build(
                 bot_id=config.bot_name,
                 bot_name=config.process_name,
@@ -387,22 +388,23 @@ class MonitoringAgent:
                 transaction_unit=config.transaction_unit,
                 transaction_unit_singular=config.transaction_unit_singular,
                 show_error_groups=config.show_error_groups,
+                enable_tag_agents=config.enable_tag_agents,
                 max_error_groups=config.max_error_groups,
                 mention_user_ids=effective_mentions,
                 freshdesk_url=self._get_effective_freshdesk_url(),
             )
 
-            # 5. Enviar mensaje de texto
+            # 5. Send text message
             await self.__api_slack.send_message(
                 channel_name=config.channel_name,
                 message=message,
             )
             logger.info(
-                f"Mensaje de estado enviado para run_id={run_id}, bot_id={bot_id} "
-                f"en canal {config.channel_name}."
+                f"Status message sent for run_id={run_id}, bot_id={bot_id} "
+                f"in channel {config.channel_name}."
             )
 
-            # 6. Gráfica — solo si la ejecución finalizó y el flag está activo
+            # 6. Chart — only if the execution finished and the flag is active
             run_state = (status.get("run_state") or "").lower().strip()
             if config.enable_chart and run_state not in _RPA_IN_PROGRESS_STATES:
                 await self._send_rpa_chart(status=status, config=config)
@@ -424,32 +426,33 @@ class MonitoringAgent:
         self,
         run_ids: List[int],
         bot_id: str,
-    ) -> Dict[str, str]:
+        seen_errors: List[str] | None = None,
+    ) -> tuple[Dict[str, str], List[str], List[int]]:
         """
-        Obtiene el status de TODAS las run_ids activas y envía UN ÚNICO mensaje
-        fusionado al canal Slack. Usado exclusivamente por bee_observa.
+        Gets the status of ALL active run_ids and sends a SINGLE merged message
+        to the Slack channel. Used exclusively by bee_observa.
 
-        Los run_ids deben llegar ya ordenados cronológicamente (ascendente) —
-        el caller (_dispatch_status_multi en rpa_orchestration_service) lo garantiza.
+        The run_ids must arrive already ordered chronologically (ascending) —
+        the caller (_dispatch_status_multi in rpa_orchestration_service) guarantees it.
 
         Args:
-            run_ids:  Lista de run_ids numéricos, ya ordenados cronológicamente.
-            bot_id:   id_dashboard del bot para llamadas a Beecker API.
+            run_ids: List of numeric run_ids, already ordered chronologically.
+            bot_id:  bot's id_dashboard for Beecker API calls.
 
         Returns:
-            dict {str(run_id): run_state} con el estado de cada ejecución procesada.
-            Si ningún run_id está disponible aún, retorna {} sin enviar mensaje.
+            dict {str(run_id): run_state} with the state of each processed execution.
+            If no run_id is available yet, returns {} without sending message.
 
         Raises:
-            RuntimeError: Si load_config() no fue llamado previamente.
+            RuntimeError: If load_config() was not called previously.
         """
         try:
             if self.__rpa_config is None or self.__api_beecker is None:
-                raise RuntimeError("Debes llamar a load_config() antes de send_status_rpa_multi().")
+                raise RuntimeError("You must call load_config() before send_status_rpa_multi().")
 
             config = self.__rpa_config
 
-            # 1. Obtener status de cada run_id (concurrente para eficiencia)
+            # 1. Get status of each run_id (concurrent for efficiency)
             skipped: list[int] = []
 
             async def _fetch_one(rid: int) -> dict | None:
@@ -472,23 +475,69 @@ class MonitoringAgent:
                 logger.warning(
                     f"⏳ [MULTI] Ningún run_id disponible aún | run_ids={run_ids}"
                 )
-                return {}
+                return {}, list(seen_errors or []), skipped
 
-            # 2. Calcular si se deben suprimir los tags (todos los errores de todos
-            #    los status son de negocio)
+            # 2. Calculate if tags should be suppressed (all errors from all
+            #    statuses are business)
             all_error_groups = [g for s in status_list for g in s.get("error_groups", [])]
-            effective_mentions = (
-                []
-                if _should_suppress_mentions(all_error_groups, config.business_errors)
-                else self._mention_ids
+
+            _seen: set[str] = set(seen_errors or [])
+
+            # Representatives of all current errors
+            current_representatives: list[str] = [
+                g.get("representative", g.get("description", ""))
+                for g in all_error_groups
+            ]
+
+            # An error is "new" if no element of _seen covers it as substring
+            # (case-insensitive, same as _is_business_error)
+            def _is_already_seen(rep: str) -> bool:
+                rep_lower = rep.lower()
+                return any(
+                    seen_item.lower() in rep_lower or rep_lower in seen_item.lower()
+                    for seen_item in _seen
+                )
+
+            has_new_errors = any(
+                not _is_already_seen(rep)
+                for rep in current_representatives
+                if rep  # ignore empty strings
             )
-            if not effective_mentions and self._mention_ids:
+
+            suppress_flag_disabled = not config.enable_tag_agents
+            suppress_business = _should_suppress_mentions(all_error_groups, config.business_errors)
+            # Anti-spam: hay grupos de error pero ninguno es nuevo
+            suppress_seen = bool(current_representatives) and not has_new_errors
+
+            if suppress_flag_disabled:
+                effective_mentions = []
+                logger.info(
+                    f"🔕 [MENTIONS] Tag suprimido — enable_tag_agents deshabilitado | "
+                    f"run_ids={run_ids} | bot_id={bot_id}"
+                )
+            elif suppress_business:
+                effective_mentions = []
                 logger.info(
                     f"🔕 [MENTIONS] Tag suprimido — todos los errores son de negocio | "
                     f"run_ids={run_ids} | bot_id={bot_id}"
                 )
+            elif suppress_seen:
+                effective_mentions = []
+                logger.info(
+                    f"🔕 [MENTIONS] Tag suprimido — sin errores nuevos (anti-spam) | "
+                    f"run_ids={run_ids} | bot_id={bot_id} | "
+                    f"errores_vistos={list(_seen)} | "
+                    f"errores_actuales={current_representatives}"
+                )
+            else:
+                effective_mentions = self._mention_ids
 
-            # 3. Construir mensaje fusionado (un saludo + N bloques en orden cronológico)
+            # Accumulate seen_errors: union of previous + current representatives not empty
+            updated_seen_errors: list[str] = list(
+                _seen | {r for r in current_representatives if r}
+            )
+
+            # 3. Build merged message (one greeting + N blocks in chronological order)
             message = self._rpa_message_builder.build_multi(
                 bot_id=config.bot_name,
                 bot_name=config.process_name,
@@ -496,12 +545,13 @@ class MonitoringAgent:
                 transaction_unit=config.transaction_unit,
                 transaction_unit_singular=config.transaction_unit_singular,
                 show_error_groups=config.show_error_groups,
+                enable_tag_agents=config.enable_tag_agents,
                 max_error_groups=config.max_error_groups,
                 mention_user_ids=effective_mentions,
                 freshdesk_url=self._get_effective_freshdesk_url(),
             )
 
-            # 4. Enviar mensaje
+            # 4. Send message
             await self.__api_slack.send_message(
                 channel_name=config.channel_name,
                 message=message,
@@ -511,18 +561,19 @@ class MonitoringAgent:
                 f"canal={config.channel_name}."
             )
 
-            # 5. Gráfica — solo para ejecuciones terminadas
+            # 5. Chart — only for finished executions
             if config.enable_chart:
                 for status_dict in status_list:
                     run_state_s = (status_dict.get("run_state") or "").lower().strip()
                     if run_state_s not in _RPA_IN_PROGRESS_STATES:
                         await self._send_rpa_chart(status=status_dict, config=config)
 
-            # 6. Retornar mapa {str(run_id): run_state}
-            return {
+            # 6. Return map {str(run_id): run_state}
+            run_states = {
                 str(s["run_id"]): (s.get("run_state") or "").lower().strip()
                 for s in status_list
             }
+            return run_states, updated_seen_errors, skipped
 
         except Exception as e:
             await self._send_error_to_slack(
@@ -554,7 +605,7 @@ class MonitoringAgent:
         """
         try:
             if self.__agent_config is None or self.__agent_beecker is None:
-                raise RuntimeError("Debes llamar a load_agent_config() antes de send_status_agent().")
+                raise RuntimeError("You must call load_agent_config() before send_status_agent().")
 
             config = self.__agent_config
 
@@ -604,7 +655,6 @@ class MonitoringAgent:
             )
             raise
 
-    # ── Helpers privados — charts ─────────────────────────────────────────────
 
     async def _send_rpa_chart(self, status: dict, config: RPAConfig) -> None:
         """Generate and send the RPA execution chart to Slack."""
@@ -618,13 +668,13 @@ class MonitoringAgent:
             await self.__api_slack.send_image(
                 file=img_bytes,
                 channel=config.channel_name,
-                tittle=f"Gráfica de ejecución — {chart_title}",
+                tittle=f"Execution chart — {chart_title}",
                 comment=f"📊 Resumen visual de la ejecución *{run_state}*",
             )
-            logger.info(f"Gráfica RPA enviada a {config.channel_name}.")
+            logger.info(f"RPA chart sent to {config.channel_name}.")
 
         except Exception as chart_err:
-            logger.warning(f"No se pudo generar/enviar la gráfica RPA: {chart_err}.")
+            logger.warning(f"Could not generate/send the RPA chart: {chart_err}.")
             await self._send_error_to_slack(
                 issue=str(chart_err),
                 context=f"_send_rpa_chart (bot={config.bot_name})",
@@ -648,18 +698,17 @@ class MonitoringAgent:
             logger.info(f"Gráfica de agente enviada a {config.channel_name}.")
 
         except Exception as chart_err:
-            logger.warning(f"No se pudo generar/enviar la gráfica del agente: {chart_err}.")
+            logger.warning(f"Could not generate/send the agent chart: {chart_err}.")
             await self._send_error_to_slack(
                 issue=str(chart_err),
                 context=f"_send_agent_chart (agente={config.agent_name})",
                 traceback_str=tb.format_exc(),
             )
 
-    # ── Helpers privados — autenticación ─────────────────────────────────────
 
     async def _login_slack(self, token: str) -> None:
         if not token:
-            raise ValueError("El token de Slack está vacío.")
+            raise ValueError("The Slack token is empty.")
         try:
             api_slack = SlackAPI()
             await api_slack.login(token)
@@ -677,7 +726,7 @@ class MonitoringAgent:
         target: str = "_rpa",
     ) -> None:
         if not (email and password):
-            raise ValueError("El email y/o password de Beecker no pueden estar vacíos.")
+            raise ValueError("The Beecker email and/or password cannot be empty.")
         try:
             api = BeeckerAPI(platform=platform)
             await api.login(email, password)
@@ -696,7 +745,7 @@ class MonitoringAgent:
 
     async def _login_fresh(self, username: str, password: str) -> None:
         if not (username and password):
-            raise ValueError("El usuario y/o password de FreshDesk no pueden estar vacíos.")
+            raise ValueError("The FreshDesk username and/or password cannot be empty.")
         try:
             api_freshdesk = FreshDeskAPI()
             await api_freshdesk.login(username, password)
@@ -706,7 +755,6 @@ class MonitoringAgent:
             logger.error("Error al autenticar en FreshDesk.")
             raise
 
-    # ── Helpers privados — resolución de recursos ─────────────────────────────
 
     async def _resolve_mention_ids(self, emails: List[str], context: str = "") -> List[str]:
         resolved_ids: List[str] = []
@@ -769,9 +817,9 @@ class MonitoringAgent:
                 ),
             )
         except Exception as slack_err:
-            logger.error(f"No se pudo enviar el error a Slack: {slack_err}")
+            logger.error(f"Could not send the error to Slack: {slack_err}")
 
-    # ── Helpers privados — utilidades ─────────────────────────────────────────
+    # ── Helpers privados  ─────────────────────────────────────────
 
     def _is_slack_authenticated(self) -> bool:
         return (

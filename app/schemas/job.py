@@ -4,6 +4,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.models.job import ExecutionStatus, JobStatus, TriggerType
+from app.schemas.rpa_dashboard import MonitoringResponse
 
 
 # ── Trigger configs ───────────────────────────────────────────────────────────
@@ -110,12 +111,15 @@ class JobResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     next_run_time: datetime | None
+    rpa_dashboard: MonitoringResponse | None = None
+    rpa_uipath: MonitoringResponse | None = None
     model_config = {"from_attributes": True}
 
 
 class ExecutionResponse(BaseModel):
     id: int
     job_id: str
+    job: JobResponse | None = None
     status: ExecutionStatus
     started_at: datetime
     finished_at: datetime | None

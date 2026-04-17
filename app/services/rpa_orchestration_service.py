@@ -39,6 +39,7 @@ from app.models.job import Job, JobStatus
 from app.services.beecker.beecker_api import BeeckerAPIError, RunNotYetAvailableError
 from app.services.config.rpa_config import RPAConfig
 from app.services.monitoring_service import MonitoringAgent
+from app.core.scheduler import scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +67,8 @@ def _load_relations_by_dashboard_id(db: Session, id_dashboard: str) -> list[RPAD
     )
     if not relations:
         raise RuntimeError(
-            f"No se encontró configuración de monitoreo para id_dashboard='{id_dashboard}'. "
-            f"Verifica que el bot esté registrado en rpa_dashboard y rpa_dashboard_monitoring."
+            f"No monitoring configuration found for id_dashboard='{id_dashboard}'. "
+            f"Verify that the bot is registered in rpa_dashboard and rpa_dashboard_monitoring."
         )
     return relations
 
@@ -90,7 +91,7 @@ def _load_relation_by_monitoring_id(db: Session, monitoring_id: str) -> RPADashb
     )
     if not relation:
         raise RuntimeError(
-            f"No se encontró configuración de monitoreo para monitoring_id='{monitoring_id}'."
+            f"No monitoring configuration found for monitoring_id='{monitoring_id}'."
         )
     return relation
 
@@ -118,24 +119,25 @@ def _read_flags(relation: RPADashboardMonitoring) -> dict:
         "enable_freshdesk_link": flags.get("enable_freshdesk_link", True),
         "enable_chart":          flags.get("enable_chart",          True),
         "show_error_groups":     flags.get("show_error_groups",     True),
+        "enable_tag_agents":     flags.get("enable_tag_agents",     True)
     }
 
 
 def _build_config(relation: RPADashboardMonitoring) -> RPAConfig:
     """
-    Construye RPAConfig desde los datos de la BD para un monitoring específico.
+    Builds RPAConfig from DB data for a specific monitoring.
 
-    - bot_name             → rpa.id_beecker            (visible en Slack, ej: "AEC.001")
-    - id_dashboard         → rpa.id_dashboard           (id numérico para la API, ej: "104")
-    - freshdesk_company_id → rpa.client.id_freshdesk    (id numérico empresa en FreshDesk)
+    - bot_name             → rpa.id_beecker (visible in Slack, e.g: "AEC.001")
+    - id_dashboard         → rpa.id_dashboard (numeric id for the API, e.g: "104")
+    - freshdesk_company_id → rpa.client.id_freshdesk (numeric company id in FreshDesk)
 
-    Flags leídas desde manage_flags JSON en BD:
+    Flags read from manage_flags JSON in DB:
         enable_overtime_check, enable_freshdesk_link, enable_chart, show_error_groups
 
-    Lógica de enable_freshdesk_link:
-        True solo si la flag en BD es True Y el cliente tiene id_freshdesk.
-        Si la flag es False → link omitido aunque haya id_freshdesk.
-        Si la flag es True pero no hay id_freshdesk → link omitido sin error.
+    enable_freshdesk_link logic:
+        True only if the DB flag is True AND the client has id_freshdesk.
+        If the flag is False → link omitted even if id_freshdesk exists.
+        If the flag is True but no id_freshdesk → link omitted without error.
     """
     rpa    = relation.rpa
     client = rpa.client  # disponible por el eager load
@@ -168,6 +170,7 @@ def _build_config(relation: RPADashboardMonitoring) -> RPAConfig:
         enable_freshdesk_link=effective_freshdesk_link,
         enable_chart=flags["enable_chart"],
         show_error_groups=flags["show_error_groups"],
+        enable_tag_agents=flags["enable_tag_agents"],
         # FreshDesk
         freshdesk_company_id=freshdesk_company_id,
         business_errors=rpa.business_errors or [],
@@ -176,8 +179,8 @@ def _build_config(relation: RPADashboardMonitoring) -> RPAConfig:
 
 async def _resolve_latest_run_id(config: RPAConfig) -> str:
     """
-    Resuelve el run_id más reciente para un bot.
-    Usado exclusivamente por bee_informa (sin run_ids inyectados).
+    Resolves the latest run_id for a bot.
+    Used exclusively by bee_informa (without injected run_ids).
     """
     from app.services.beecker.beecker_api import BeeckerAPI
     api = BeeckerAPI(platform=config.platform)
@@ -188,13 +191,13 @@ async def _resolve_latest_run_id(config: RPAConfig) -> str:
 
     if not last_run:
         raise RuntimeError(
-            f"No se encontró ningún run reciente para id_dashboard='{config.id_dashboard}'"
+            f"No recent run found for id_dashboard='{config.id_dashboard}'"
         )
 
     run_id = str(last_run.get("run_id") or last_run.get("id", ""))
     if not run_id:
         raise RuntimeError(
-            f"El último run de id_dashboard='{config.id_dashboard}' no tiene run_id válido."
+            f"The last run of id_dashboard='{config.id_dashboard}' does not have a valid run_id."
         )
 
     return run_id
@@ -208,8 +211,8 @@ async def _dispatch_status_single(
     monitoring_id: str,
 ) -> str | None:
     """
-    Envía el status de UNA ejecución al canal Slack.
-    Usado por bee_informa (sin run_ids inyectados) y por _finalize_observa.
+    Sends the status of ONE execution to the Slack channel.
+    Used by bee_informa (without injected run_ids) and by _finalize_observa.
     """
     try:
         monitoring = MonitoringAgent()
@@ -241,14 +244,20 @@ async def _dispatch_status_multi(
     job_id: str | None = None,
 ) -> dict[str, str]:
     """
-    Obtiene el status de TODAS las run_ids activas y envía UN ÚNICO mensaje
-    fusionado al canal Slack.
+    Gets the status of ALL active run_ids and sends a SINGLE merged message
+    to the Slack channel.
 
-    Los bloques se ordenan cronológicamente (run_id ascendente).
-    Para cada run_id en estado terminal, llama a pause_observa_job.
+    Blocks are ordered chronologically (run_id ascending).
+    For each run_id in terminal state, calls pause_observa_job.
+
+    Also manages:
+    - seen_errors (anti-spam): suppresses ROC tags when present errors
+      were already notified in previous ticks. Persisted in job_kwargs.
+    - not_found_attempts: if a run_id does not appear in Beecker for 2 consecutive ticks,
+      it is removed from run_ids and notified to CHANNEL_ERROR.
 
     Returns:
-        dict {run_id: run_state} con el estado final de cada ejecución.
+        dict {run_id: run_state} with the final state of each processed execution.
     """
     from app.services import job_service
 
@@ -257,17 +266,109 @@ async def _dispatch_status_multi(
 
     sorted_run_ids = sorted(run_ids, key=lambda r: int(r) if r.isdigit() else r)
 
-    run_states = await monitoring.send_status_rpa_multi(
+    # ── Read persisted state in job_kwargs ──────────────────────────────────
+    db_job = db.get(Job, job_id) if job_id else None
+    current_kwargs: dict = dict(db_job.job_kwargs) if db_job else {}
+
+    seen_errors: list[str]             = list(current_kwargs.get("seen_errors", []))
+    not_found_attempts: dict[str, int] = dict(current_kwargs.get("not_found_attempts", {}))
+
+    # ── Send merged message ──────────────────────────────────────────────
+    run_states, updated_seen_errors, skipped_int = await monitoring.send_status_rpa_multi(
         run_ids=[int(r) for r in sorted_run_ids],
         bot_id=config.id_dashboard,
+        seen_errors=seen_errors,
     )
+    # skipped_int contiene run_ids numéricos que lanzaron RunNotYetAvailableError
+    skipped_str: set[str] = {str(r) for r in skipped_int}
 
     logger.info(
         f"✅ [STATUS] Mensaje fusionado enviado | bot_name={config.bot_name} | "
         f"run_ids={sorted_run_ids} | monitoring_id={monitoring_id} | "
-        f"channel={config.channel_name} | estados={run_states}"
+        f"channel={config.channel_name} | estados={run_states} | "
+        f"skipped={list(skipped_str)}"
     )
 
+    # ── Update not_found_attempts based on skipped in this tick ──────────
+    _MAX_NOT_FOUND = 2
+    run_ids_to_remove: list[str] = []
+
+    for rid in sorted_run_ids:
+        if rid in skipped_str:
+            not_found_attempts[rid] = not_found_attempts.get(rid, 0) + 1
+            logger.warning(
+                f"⚠️ [NOT_FOUND] run_id={rid} no encontrado | "
+                f"intento={not_found_attempts[rid]}/{_MAX_NOT_FOUND} | "
+                f"job_id={job_id}"
+            )
+            if not_found_attempts[rid] >= _MAX_NOT_FOUND:
+                run_ids_to_remove.append(rid)
+        else:
+            # Apareció — limpiar contador previo si existía
+            if rid in not_found_attempts:
+                logger.info(
+                    f"✅ [NOT_FOUND] run_id={rid} volvió a aparecer, contador reseteado | "
+                    f"job_id={job_id}"
+                )
+                del not_found_attempts[rid]
+
+    # ── Remove run_ids that exhausted attempts and notify to error channel ───
+    for rid in run_ids_to_remove:
+        logger.error(
+            f"❌ [NOT_FOUND] run_id={rid} removido tras {_MAX_NOT_FOUND} ticks sin aparecer | "
+            f"bot_name={config.bot_name} | job_id={job_id}"
+        )
+        not_found_attempts.pop(rid, None)
+
+        try:
+            from app.services.monitoring_service import _ErrorMessages as ErrorMessageBuilder
+            from app.services.slack.slack_api import SlackAPI
+
+            error_msg = ErrorMessageBuilder.build(
+                issue=(
+                    f"El run_id *{rid}* no fue encontrado en {_MAX_NOT_FOUND} ticks "
+                    f"consecutivos y fue removido del monitoreo automáticamente."
+                ),
+                bot_name=config.bot_name,
+                context=f"job_id={job_id} | run_id={rid}",
+            )
+            slack_error = SlackAPI(token=config.token_slack)
+            await slack_error.send_message(
+                channel_name=ErrorMessageBuilder.CHANNEL_ERROR,
+                message=error_msg,
+            )
+        except Exception as notify_err:
+            logger.error(
+                f"❌ [NOT_FOUND] Fallo al notificar remoción de run_id={rid} | {notify_err}"
+            )
+
+        # Remover del job (pause_observa_job lo quita de run_ids en BD y APS)
+        if job_id:
+            job_service.pause_observa_job(db, job_id, rid)
+
+    # ── Persist seen_errors and not_found_attempts in job_kwargs ─────────────
+    if job_id and db_job:
+        # Releer para reflejar posibles cambios de pause_observa_job
+        db.refresh(db_job)
+        fresh_kwargs = dict(db_job.job_kwargs)
+        fresh_kwargs["seen_errors"]        = updated_seen_errors
+        fresh_kwargs["not_found_attempts"] = not_found_attempts
+        db_job.job_kwargs = fresh_kwargs
+
+        aps_job = scheduler.get_job(job_id)
+        if aps_job:
+            aps_job.modify(kwargs={
+                "job_id":    job_id,
+                "task_path": db_job.task_path,
+                **fresh_kwargs,
+            })
+        db.commit()
+        logger.debug(
+            f"💾 [KWARGS] seen_errors y not_found_attempts persistidos | "
+            f"job_id={job_id} | seen={updated_seen_errors} | nfa={not_found_attempts}"
+        )
+
+    # ── Pause run_ids in terminal state ─────────────────────────────────────
     if job_id:
         for run_id, state in run_states.items():
             if (state or "").lower() in _TERMINAL_STATES:
@@ -280,7 +381,6 @@ async def _dispatch_status_multi(
 
     return run_states
 
-
 # ── Handlers de inicio ────────────────────────────────────────────────────────
 
 async def _handle_start_one(
@@ -289,10 +389,10 @@ async def _handle_start_one(
     run_id: str,
 ) -> None:
     """
-    Procesa el inicio de una ejecución para UN registro de monitoring.
+    Processes the start of an execution for ONE monitoring record.
 
-    - Si start_active=True: envía el mensaje de inicio con #run_id.
-    - Para bee_observa: agrega run_id a la lista del job (independiente de start_active).
+    - If start_active=True: sends the start message with #run_id.
+    - For bee_observa: adds run_id to the job's list (independent of start_active).
     """
     flags = _read_flags(relation)
 
@@ -324,10 +424,10 @@ async def _handle_end_one(
     run_id: str,
 ) -> None:
     """
-    Procesa el fin de una ejecución para UN registro de monitoring.
+    Processes the end of an execution for ONE monitoring record.
 
-    - Si end_active=False y NO es bee_observa: omite el mensaje de fin.
-    - Para bee_observa: siempre procesa (la lógica de duplicados vive en _finalize_observa).
+    - If end_active=False and NOT bee_observa: omits the end message.
+    - For bee_observa: always processes (duplicate logic lives in _finalize_observa).
     """
     flags = _read_flags(relation)
 
@@ -352,8 +452,8 @@ async def _activate_observa(
     run_id: str,
 ) -> None:
     """
-    Agrega run_id al job bee_observa (o lo reanuda si estaba pausado).
-    activate_observa_job maneja ambos casos internamente.
+    Adds run_id to the bee_observa job (or resumes it if paused).
+    activate_observa_job handles both cases internally.
     """
     from app.services import job_service
 
@@ -385,15 +485,15 @@ async def _finalize_observa(
     config: RPAConfig,
 ) -> None:
     """
-    Maneja el fin de una ejecución en bee_observa.
+    Handles the end of an execution in bee_observa.
 
-    1. Lee todos los run_ids activos del job (incluido el que acaba de terminar).
-    2. Envía UN mensaje fusionado con el estado de todas (terminadas + en progreso).
-    3. Llama a pause_observa_job para remover run_id de la lista.
-       Si la lista queda vacía, el job se pausa.
+    1. Reads all active run_ids from the job (including the one that just finished).
+    2. Sends ONE merged message with the status of all (finished + in progress).
+    3. Calls pause_observa_job to remove run_id from the list.
+       If the list is empty, the job is paused.
 
-    Si el job ya está pausado (el scheduler llegó primero y procesó el estado terminal),
-    se omite para evitar duplicados.
+    If the job is already paused (the scheduler arrived first and processed the terminal state),
+    it is omitted to avoid duplicates.
     """
     from app.services import job_service
 
@@ -421,7 +521,7 @@ async def _finalize_observa(
                 )
                 return
 
-    # Fallback: no hay job configurado, enviar mensaje individual
+    # Fallback: no job configured, send individual message
     await _dispatch_status_single(config=config, run_id=run_id, monitoring_id=relation.id)
 
 
@@ -463,18 +563,17 @@ async def _retry_execution_end(config: RPAConfig, run_id: str, monitoring_id: st
     )
 
 
-# ── Entry points públicos ─────────────────────────────────────────────────────
 
 async def handle_execution_start(db: Session, run_id: str, bot_id: str) -> None:
     """
-    Maneja el inicio de una ejecución RPA (POST /rpa/execution).
-    bot_id = id_dashboard numérico (ej: "114").
+    Handles the start of an RPA execution (POST /rpa/execution).
+    bot_id = numeric id_dashboard (e.g: "114").
     """
     logger.info(f"🐝 [START] id_dashboard={bot_id} | run_id={run_id}")
 
     relations = _load_relations_by_dashboard_id(db, bot_id)
     logger.info(
-        f"🔀 [START] {len(relations)} monitoreo(s) encontrado(s) para id_dashboard={bot_id}"
+        f"🔀 [START] {len(relations)} monitoring(s) found for id_dashboard={bot_id}"
     )
 
     results = await asyncio.gather(
@@ -492,8 +591,8 @@ async def handle_execution_start(db: Session, run_id: str, bot_id: str) -> None:
 
 async def handle_execution_end(db: Session, run_id: str, bot_id: str) -> None:
     """
-    Maneja el fin de una ejecución RPA (PUT /rpa/execution/{id}).
-    bot_id = id_dashboard numérico (ej: "114").
+    Handles the end of an RPA execution (PUT /rpa/execution/{id}).
+    bot_id = numeric id_dashboard (e.g: "114").
     """
     logger.info(f"🐝 [END] id_dashboard={bot_id} | run_id={run_id}")
 
@@ -523,14 +622,14 @@ async def send_rpa_status(
     monitoring_id: str | None = None,
 ) -> None:
     """
-    Envía el status del RPA para UNA configuración específica.
-    Llamado por el scheduler (scheduled_rpa_status en rpa_tasks.py).
+    Sends the RPA status for ONE specific configuration.
+    Called by the scheduler (scheduled_rpa_status in rpa_tasks.py).
 
     bot_id        = id_beecker ("AEC.001")
-    job_id        = ID del job APScheduler (necesario para pause_observa_job)
-    run_ids       = lista de run_ids activos inyectada por activate_observa_job.
-                    None → resolución automática del run_id más reciente (bee_informa).
-    monitoring_id = PK del registro en rpa_dashboard_monitoring.
+    job_id        = APScheduler job ID (necessary for pause_observa_job)
+    run_ids       = list of active run_ids injected by activate_observa_job.
+                    None → automatic resolution of the latest run_id (bee_informa).
+    monitoring_id = PK of the record in rpa_dashboard_monitoring.
     """
     logger.info(
         f"🐝 [STATUS] id_beecker={bot_id} | monitoring_id={monitoring_id} | "
@@ -550,7 +649,7 @@ async def send_rpa_status(
             .all()
         )
         if not relations:
-            raise RuntimeError(f"No se encontró monitoring para id_beecker='{bot_id}'.")
+            raise RuntimeError(f"No monitoring found for id_beecker='{bot_id}'.")
         relation = relations[0]
         logger.warning(
             f"⚠️ [STATUS] monitoring_id no proporcionado, usando primer registro | "

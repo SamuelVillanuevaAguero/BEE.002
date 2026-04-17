@@ -143,6 +143,7 @@ class RPAConfig:
     enable_overtime_check: bool = False
     enable_freshdesk_link: bool = True
     enable_chart: bool = False
+    enable_tag_agents: bool = True
 
     business_errors: List[str] = field(default_factory=list)
 

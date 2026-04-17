@@ -19,13 +19,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# ── Margen de seguridad: refrescar si quedan menos de N minutos ───────────────
 _REFRESH_MARGIN_MINUTES = 5
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Beecker
-# ═══════════════════════════════════════════════════════════════════════════════
 
 class BeeckerSessionManager:
     """
@@ -56,13 +50,11 @@ class BeeckerSessionManager:
         self._lock = asyncio.Lock()
         self._initialized = True
 
-    # ── Public API ────────────────────────────────────────────────────────────
-
     async def get_token(
         self,
         email: str,
         password: str,
-        http_client,           # HttpClient instance from caller
+        http_client,
         login_url:   str = "https://api.dashboard.beecker.ai/api/auth/login/",
         refresh_url: str = "https://api.beecker.ai/api/auth/token/refresh/",
     ) -> str:
@@ -81,25 +73,23 @@ class BeeckerSessionManager:
         self._init_state()
 
         async with self._lock:
-            # ── Case 1: valid session ─────────────────────────────────────────
+            # Valid session
             if self._is_valid():
-                return self._access_token  # type: ignore[return-value]
+                return self._access_token
 
-            # ── Case 2: refresh token available and access is about to expire ────
+            # Refresh token available and access is about to expire
             if self._refresh_token:
                 try:
                     await self._do_refresh(http_client, refresh_url)
                     logger.info("🔄 [BeeckerSession] Token refrescado correctamente.")
-                    return self._access_token  # type: ignore[return-value]
+                    return self._access_token
                 except Exception as e:
-                    logger.warning(
-                        f"⚠️ [BeeckerSession] Refresh falló ({e}), haciendo login completo."
-                    )
+                    logger.warning(f"⚠️ [BeeckerSession] Refresh falló ({e}), haciendo login completo.")
 
-            # ── Case 3: first login or failed refresh ────────────────────────
+            # First login or failed refresh
             await self._do_login(email, password, http_client, login_url)
             logger.info("🔐 [BeeckerSession] Login exitoso. Sesión activa por ~4h.")
-            return self._access_token  # type: ignore[return-value]
+            return self._access_token
 
     def force_invalidate(self) -> None:
         """Force next get_token() call to refresh/re-login (e.g. after a 401)."""
@@ -112,7 +102,6 @@ class BeeckerSessionManager:
         self._initialized = False
         self._init_state()
 
-    # ── Private helpers ───────────────────────────────────────────────────────
 
     def _is_valid(self) -> bool:
         if not self._access_token or not self._expires_at:
@@ -123,6 +112,8 @@ class BeeckerSessionManager:
     async def _do_login(
         self, email: str, password: str, http_client, login_url: str
     ) -> None:
+        logger.info(f"🔑 [BeeckerSession] Intentando login | email={email} | url={login_url}")
+
         result = await http_client.post(
             login_url,
             json={"email": email, "password": password},
@@ -151,7 +142,7 @@ class BeeckerSessionManager:
         data = result["data"]
         self._store_tokens(
             access=data["access"],
-            refresh=self._refresh_token,   # el refresh token no cambia
+            refresh=self._refresh_token,
         )
 
     def _store_tokens(self, access: str, refresh: Optional[str]) -> None:
@@ -173,13 +164,8 @@ class BeeckerSessionManager:
             logger.debug(f"[BeeckerSession] Token válido por ~{remaining} min.")
 
 
-# ── Instancia global ──────────────────────────────────────────────────────────
 beecker_session = BeeckerSessionManager()
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Slack
-# ═══════════════════════════════════════════════════════════════════════════════
 
 class SlackSessionManager:
     """
@@ -217,11 +203,6 @@ class SlackSessionManager:
 
 
 slack_session = SlackSessionManager()
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# FreshDesk
-# ═══════════════════════════════════════════════════════════════════════════════
 
 class FreshDeskSessionManager:
     """

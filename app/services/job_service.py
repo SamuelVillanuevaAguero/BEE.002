@@ -10,7 +10,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.scheduler import scheduler
 from app.db.session import SessionLocal
@@ -33,7 +33,7 @@ def _build_trigger(trigger_type: TriggerType, trigger_args: dict):
         case TriggerType.date:
             return DateTrigger(**trigger_args)
         case _:
-            raise ValueError(f"Tipo de trigger no soportado: {trigger_type}")
+            raise ValueError(f"Unsupported trigger type: {trigger_type}")
 
 
 def _normalize_interval_args(trigger_args: dict) -> dict:
@@ -91,7 +91,7 @@ def _wrapped_task(job_id: str, task_path: str, **kwargs):
 
     except Exception as e:
         elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
-        execution.status = ExecutionStatus.failed
+        execution.status = ExecutionStatus.failure
         execution.error = str(e)[:500]
         execution.finished_at = datetime.now(timezone.utc)
         db.commit()
@@ -105,7 +105,7 @@ def _wrapped_task(job_id: str, task_path: str, **kwargs):
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
-def create_job(db: Session, payload: JobCreate) -> Job:
+async def create_job(db: Session, payload: JobCreate) -> Job:
     job_id = str(uuid.uuid4())
     trigger = _build_trigger(payload.trigger_type, payload.trigger_args)
 
@@ -140,18 +140,18 @@ def create_job(db: Session, payload: JobCreate) -> Job:
     return db_job
 
 
-def list_jobs(db: Session, status: JobStatus | None = None) -> list[Job]:
+async def list_jobs(db: Session, status: JobStatus | None = None) -> list[Job]:
     stmt = select(Job).order_by(Job.created_at.desc())
     if status:
         stmt = stmt.where(Job.status == status)
     return db.execute(stmt).scalars().all()
 
 
-def get_job(db: Session, job_id: str) -> Job | None:
+async def get_job(db: Session, job_id: str) -> Job | None:
     return db.get(Job, job_id)
 
 
-def update_job(db: Session, job_id: str, payload: JobUpdate) -> Job | None:
+async def update_job(db: Session, job_id: str, payload: JobUpdate) -> Job | None:
     db_job = db.get(Job, job_id)
     if not db_job:
         return None
@@ -183,7 +183,7 @@ def update_job(db: Session, job_id: str, payload: JobUpdate) -> Job | None:
     return db_job
 
 
-def pause_job(db: Session, job_id: str) -> Job | None:
+async def pause_job(db: Session, job_id: str) -> Job | None:
     db_job = db.get(Job, job_id)
     if not db_job or db_job.status != JobStatus.active:
         return None
@@ -196,7 +196,7 @@ def pause_job(db: Session, job_id: str) -> Job | None:
     return db_job
 
 
-def resume_job(db: Session, job_id: str) -> Job | None:
+async def resume_job(db: Session, job_id: str) -> Job | None:
     db_job = db.get(Job, job_id)
     if not db_job or db_job.status != JobStatus.paused:
         return None
@@ -209,7 +209,7 @@ def resume_job(db: Session, job_id: str) -> Job | None:
     return db_job
 
 
-def delete_job(db: Session, job_id: str) -> bool:
+async def delete_job(db: Session, job_id: str) -> bool:
     db_job = db.get(Job, job_id)
     if not db_job:
         return False
@@ -219,11 +219,11 @@ def delete_job(db: Session, job_id: str) -> bool:
         pass
     db.delete(db_job)
     db.commit()
-    logger.info(f"🗑️  Job eliminado: {job_id}")
+    logger.info(f"🗑️  Job deleted: {job_id}")
     return True
 
 
-def trigger_job_now(job_id: str) -> None:
+async def trigger_job_now(job_id: str) -> None:
     """Executes the job immediately without altering its schedule."""
     scheduler.get_job(job_id)
     scheduler.modify_job(job_id, next_run_time=datetime.now(timezone.utc))
@@ -231,7 +231,7 @@ def trigger_job_now(job_id: str) -> None:
 
 # ── History ───────────────────────────────────────────────────────────────────
 
-def get_executions(
+async def get_executions(
     db: Session,
     job_id: str | None = None,
     page: int = 1,
@@ -245,12 +245,14 @@ def get_executions(
         count_stmt = count_stmt.where(JobExecution.job_id == job_id)
 
     total = db.execute(count_stmt).scalar()
-    items = db.execute(stmt.offset((page - 1) * page_size).limit(page_size)).scalars().all()
+    offset = (page - 1) * page_size
+    query = stmt.offset(offset).limit(page_size)
+
+    result = db.execute(query)
+    items = result.unique().scalars().all()
 
     return {"total": total, "page": page, "page_size": page_size, "items": items}
 
-
-# ── Bee-Observa helpers ───────────────────────────────────────────────────────
 
 def activate_observa_job(
     db: Session,
@@ -259,34 +261,34 @@ def activate_observa_job(
     monitoring_id: str | None = None,
 ) -> bool:
     """
-    Agrega run_id a la lista de ejecuciones activas del job bee_observa
-    y lo reanuda si estaba pausado.
+    Adds run_id to the list of active executions of the bee_observa job
+    and resumes it if it was paused.
 
-    job_kwargs resultante: { bot_id, monitoring_id, run_ids: [...] }
-    run_id individual NO se persiste en job_kwargs ni en APScheduler kwargs.
+    resulting job_kwargs: { bot_id, monitoring_id, run_ids: [...] }
+    individual run_id is NOT persisted in job_kwargs nor in APScheduler kwargs.
 
-    Soporta múltiples ejecuciones simultáneas: cada llamada agrega un run_id
-    a job_kwargs["run_ids"]. El job solo se pausa cuando la lista queda vacía.
+    Supports multiple simultaneous executions: each call adds a run_id
+    to job_kwargs["run_ids"]. The job is only paused when the list is empty.
 
     Returns:
-        True  → run_id agregado correctamente.
-        False → run_id ya estaba en la lista (duplicado ignorado).
+        True  → run_id added successfully.
+        False → run_id was already in the list (duplicate ignored).
     """
     db_job = db.get(Job, job_id)
     if not db_job:
-        raise RuntimeError(f"Job {job_id} no encontrado en la BD")
+        raise RuntimeError(f"Job {job_id} not found in DB")
 
     existing_run_ids: list[str] = db_job.job_kwargs.get("run_ids", [])
 
     if run_id in existing_run_ids:
         logger.warning(
-            f"⚠️ [OBSERVA] run_id={run_id} ya está en la lista activa | job_id={job_id}"
+            f"⚠️ [OBSERVA] run_id={run_id} already in active list | job_id={job_id}"
         )
         return False
 
     new_run_ids = existing_run_ids + [run_id]
 
-    # Construir kwargs limpios — sin run_id individual, nunca
+    # Build clean kwargs — without individual run_id, never
     new_kwargs = {k: v for k, v in db_job.job_kwargs.items() if k != "run_id"}
     new_kwargs["run_ids"] = new_run_ids
     if monitoring_id:
@@ -310,8 +312,8 @@ def activate_observa_job(
     db.commit()
     db.refresh(db_job)
     logger.info(
-        f"🟢 [OBSERVA] run_id agregado | job_id={job_id} | "
-        f"run_ids_activos={new_run_ids} | monitoring_id={monitoring_id}"
+        f"🟢 [OBSERVA] run_id added | job_id={job_id} | "
+        f"active_run_ids={new_run_ids} | monitoring_id={monitoring_id}"
     )
     return True
 
@@ -322,25 +324,25 @@ def pause_observa_job(
     finished_run_id: str | None = None,
 ) -> bool:
     """
-    Elimina finished_run_id de la lista activa del job bee_observa.
-    Solo pausa el job cuando la lista queda completamente vacía.
+    Removes finished_run_id from the active list of the bee_observa job.
+    Only pauses the job when the list is completely empty.
 
-    job_kwargs resultante: { bot_id, monitoring_id, run_ids: [...restantes] }
-    run_id individual NUNCA se escribe.
+    resulting job_kwargs: { bot_id, monitoring_id, run_ids: [...remaining] }
+    individual run_id is NEVER written.
 
     Args:
-        db:              Sesión de BD.
-        job_id:          ID del job a gestionar.
-        finished_run_id: run_id que terminó. Si es None, fuerza pausa inmediata.
+        db:              DB session.
+        job_id:          ID of the job to manage.
+        finished_run_id: run_id that finished. If None, forces immediate pause.
 
     Returns:
-        True  → lista vacía, job pausado.
-        False → aún quedan run_ids activos, job continúa.
+        True  → list empty, job paused.
+        False → still active run_ids remain, job continues.
     """
     db_job = db.get(Job, job_id)
     if not db_job:
-        logger.warning(f"⚠️ [OBSERVA] Job {job_id} no encontrado al intentar pausar")
-        return True  # asumir pausado para no bloquear el flujo
+        logger.warning(f"⚠️ [OBSERVA] Job {job_id} not found when trying to pause")
+        return True  # assume paused to not block the flow
 
     current_run_ids: list[str] = db_job.job_kwargs.get("run_ids", [])
 
@@ -351,7 +353,7 @@ def pause_observa_job(
     )
 
     if remaining:
-        # Aún hay ejecuciones activas — actualizar lista, sin run_id individual
+        # There are still active executions — update list, without individual run_id
         new_kwargs = {k: v for k, v in db_job.job_kwargs.items() if k != "run_id"}
         new_kwargs["run_ids"] = remaining
         db_job.job_kwargs = new_kwargs
@@ -366,15 +368,14 @@ def pause_observa_job(
 
         db.commit()
         logger.info(
-            f"🔄 [OBSERVA] run_id={finished_run_id} removido, "
-            f"siguen activos: {remaining} | job_id={job_id}"
+            f"🔄 [OBSERVA] run_id={finished_run_id} removed, still active: {remaining} | job_id={job_id}"
         )
-        return False  # job NO pausado
+        return False  # job NOT paused
 
-    # Lista vacía → limpiar kwargs y pausar
+    # Empty list → clean kwargs and pause
     clean_kwargs = {
         k: v for k, v in db_job.job_kwargs.items()
-        if k not in ("run_id", "run_ids")
+        if k not in ("run_id", "run_ids", "seen_errors", "not_found_attempts")
     }
     db_job.job_kwargs = clean_kwargs
 
@@ -393,7 +394,7 @@ def pause_observa_job(
 
     db.commit()
     logger.info(
-        f"⏸ [OBSERVA] Lista vacía, job pausado | "
-        f"job_id={job_id} | último_run_id={finished_run_id}"
+        f"⏸ [OBSERVA] Empty list, job paused | "
+        f"job_id={job_id} | last_run_id={finished_run_id}"
     )
-    return True  # job pausado
+    return True  # job paused

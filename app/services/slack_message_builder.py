@@ -147,7 +147,8 @@ class MessageContext:
     transaction_unit_singular: str
     greeting: str
     run_id: Optional[str] = None
-    show_error_groups: bool = True
+    show_error_groups: bool = True,
+    enable_tag_agents: bool = True,
     max_error_groups: Optional[int] = None
     mention_user_ids: List[str] = field(default_factory=list)
     freshdesk_url: Optional[str] = None
@@ -163,7 +164,7 @@ class _BaseMessageBuilder:
 
     _STATE_EMOJI: dict[str, str] = {
         "in progress": ":in_progress:",
-        "pending":     ":in_progress:",
+        "pending":     ":load3:",
         "completed":   ":white_check_mark:",
         "failed":      ":warning-icon:",
     }
@@ -215,11 +216,15 @@ class _BaseMessageBuilder:
         failed    = status.get("failed_transactions", 0)
         pending   = max(0, total - completed - failed)
 
-        unit = unit_plural if total != 1 else unit_singular
+        #unit = unit_plural if total != 1 else unit_singular
 
-        lines = [f"Se han procesado *{completed}* de *{total}* {unit} :white_check_mark:" if completed > 0 else ""]
+        lines = [f"Resumen Transaccional:" if total > 0 else ""]
 
         details = []
+
+        if completed > 0:
+            unit_f = unit_singular if completed == 1 else unit_plural
+            details.append(f"➤ {completed} {unit_f} `completed`")
         if failed > 0:
             unit_f = unit_singular if failed == 1 else unit_plural
             details.append(f"➤ {failed} {unit_f} `failed`")
@@ -297,7 +302,7 @@ class HappyPathBuilder(_BaseMessageBuilder):
         if completed >= 1:
             lines.append(f"Se procesaron *{completed} {unit_completed}* correctamente. ✅")
         else:
-            lines.append(f"Aún no se han procesado *{ctx.transaction_unit}*")
+            lines.append(f"Aún no se han procesado *{ctx.transaction_unit}*" if ctx.status.get("run_state") in ["pending", "in progress"] else f"No sé procesaron *{ctx.transaction_unit}* en esta ejecución")
 
         if pending > 0:
             unit_p = ctx.transaction_unit_singular if pending == 1 else ctx.transaction_unit
@@ -336,7 +341,7 @@ class PartialFailureBuilder(_BaseMessageBuilder):
         ]
 
         mention = self._mentions_line(ctx.mention_user_ids)
-        if mention:
+        if mention and ctx.enable_tag_agents:
             lines.extend(["", mention])
 
         freshdesk = self._freshdesk_line(ctx.freshdesk_url)
@@ -368,7 +373,7 @@ class CriticalFailureBuilder(_BaseMessageBuilder):
         ]
 
         mention = self._mentions_line(ctx.mention_user_ids)
-        if mention:
+        if mention and ctx.enable_tag_agents:
             lines.append(mention)
             lines.append("")
 
@@ -452,7 +457,7 @@ class OvertimeBuilder(_BaseMessageBuilder):
 
         if failed > 0:
             mention = self._mentions_line(ctx.mention_user_ids)
-            if mention:
+            if mention and ctx.enable_tag_agents:
                 lines.extend(["", mention])
 
             freshdesk = self._freshdesk_line(ctx.freshdesk_url)
@@ -518,6 +523,7 @@ class RPAMessageBuilder:
         transaction_unit: str = "transacciones",
         transaction_unit_singular: str = "transacción",
         show_error_groups: bool = True,
+        enable_tag_agents: bool =  True,
         max_error_groups: Optional[int] = None,
         mention_user_ids: Optional[List[str]] = None,
         freshdesk_url: Optional[str] = None,
@@ -543,6 +549,7 @@ class RPAMessageBuilder:
             transaction_unit_singular=transaction_unit_singular,
             greeting=self._greetings.get(),
             show_error_groups=show_error_groups,
+            enable_tag_agents=enable_tag_agents,
             max_error_groups=max_error_groups,
             mention_user_ids=mention_user_ids or [],
             freshdesk_url=freshdesk_url,
@@ -558,6 +565,7 @@ class RPAMessageBuilder:
         transaction_unit: str = "transacciones",
         transaction_unit_singular: str = "transacción",
         show_error_groups: bool = True,
+        enable_tag_agents: bool = True,
         max_error_groups: Optional[int] = None,
         mention_user_ids: Optional[List[str]] = None,
         freshdesk_url: Optional[str] = None,
@@ -587,6 +595,7 @@ class RPAMessageBuilder:
                 transaction_unit_singular=transaction_unit_singular,
                 greeting=greeting if index == 0 else "",
                 show_error_groups=show_error_groups,
+                enable_tag_agents=enable_tag_agents,
                 max_error_groups=max_error_groups,
                 mention_user_ids=mentions,
                 freshdesk_url=freshdesk_url,

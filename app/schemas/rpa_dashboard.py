@@ -16,6 +16,7 @@ ManageFlagsSchema agrupa dos categorías de flags:
       funcionalidades se activan en los mensajes de estado.
 """
 from __future__ import annotations
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 from app.models.automation import MonitorType, PlatformType
@@ -67,12 +68,17 @@ class ManageFlagsSchema(BaseModel):
         description="Incluye link de tickets FreshDesk en mensajes de fallo.",
     )
     enable_chart: bool = Field(
-        default=True,
+        default=False,
         description="Genera y envía gráfica PNG al finalizar la ejecución.",
     )
     show_error_groups: bool = Field(
         default=True,
         description="Incluye desglose de grupos de error en mensajes de fallo parcial.",
+    )
+
+    enable_tag_agents: bool = Field(
+        default=True,
+        description="Activar/Desactivar el tag de los agentes ROC"
     )
 
     model_config = {"extra": "forbid"}
@@ -136,8 +142,9 @@ _MANAGE_FLAGS_EXAMPLE = {
     "end_active": True,
     "enable_overtime_check": False,
     "enable_freshdesk_link": True,
-    "enable_chart": True,
+    "enable_chart": False,
     "show_error_groups": True,
+    "enable_tag_agents": True
 }
 
 
@@ -305,7 +312,7 @@ class JobSummaryResponse(BaseModel):
     status: str
     trigger_type: str
     trigger_args: Dict[str, Any]
-    next_run_time: Optional[str] = None
+    next_run_time: Optional[datetime] = None
     model_config = {
         "from_attributes": True,
         "json_schema_extra": {
@@ -325,6 +332,8 @@ class JobSummaryResponse(BaseModel):
 
 class MonitoringResponse(BaseModel):
     id: str
+    id_beecker: Optional[str] = None
+    uipath_robot_name: Optional[str] = None
     monitor_type: MonitorType
     slack_channel: Optional[str] = None
     transaction_unit: Optional[str] = None
@@ -338,6 +347,7 @@ class MonitoringResponse(BaseModel):
             "examples": [
                 {
                     "id": "a1b2c3d4-0000-0000-0000-000000000001",
+                    "id_beecker": "AEC.001",
                     "monitor_type": "bee_informa",
                     "slack_channel": "#roc-notificaciones",
                     "transaction_unit": "Facturas|Factura",

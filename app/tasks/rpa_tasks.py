@@ -47,7 +47,7 @@ def scheduled_rpa_status(
     bot_id: str,
     run_ids: list[str] | None = None,
     monitoring_id: str | None = None,
-    **kwargs,  # absorbs legacy 'run_id' from jobs still held in APScheduler memory
+    **kwargs,
 ) -> str:
     """
     Generic task invoked periodically by APScheduler.
@@ -70,9 +70,7 @@ def scheduled_rpa_status(
         **kwargs:      Absorbs legacy fields (e.g. run_id) without breaking the task.
     """
     if kwargs:
-        logger.debug(
-            f"⚠️ [SCHEDULER] kwargs legacy ignorados: {list(kwargs.keys())} | job_id={job_id}"
-        )
+        logger.debug(f"⚠️ [SCHEDULER] kwargs legacy ignorados: {list(kwargs.keys())} | job_id={job_id}")
 
     logger.info(
         f"⏰ [SCHEDULER] Iniciando status | bot_id={bot_id} | "
@@ -104,7 +102,3 @@ def scheduled_rpa_status(
 
     finally:
         db.close()
-
-
-'''# Alias para jobs creados vía POST /rpa-dashboard/full (endpoint atómico)
-send_rpa_status_task = scheduled_rpa_status'''

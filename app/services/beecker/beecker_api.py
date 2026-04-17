@@ -949,6 +949,7 @@ class BeeckerAPI:
                 "error_groups":                list[dict],
             }
         """
+        
         try:
             # ── 1. Buscar el run en el historial ──────────────────────────────
             run_info  = await self._find_run_in_history(bot_id=bot_id, run_id=run_id)
@@ -956,6 +957,8 @@ class BeeckerAPI:
             end_run   = run_info.get("end_run")
             run_state = run_info.get("run_state", "unknown")
             details   = run_info.get("details")
+
+            logger.debug(f"DETALLES DEL RUN: {run_info}")
  
             # ── 2. Tiempo transcurrido ────────────────────────────────────────
             elapsed_minutes = self._compute_elapsed_minutes(
@@ -1121,11 +1124,12 @@ class BeeckerAPI:
     ) -> List[Dict[str, Any]]:
         """Agrupa mensajes de error por similitud semántica (SequenceMatcher)."""
         groups: List[Dict[str, Any]] = []
+        possible_keys = [details_field, "detalles", "detalle", "step"]
 
         for txn in transactions:
             if txn.get(status_field) != failed_value:
                 continue
-            msg = str(txn.get(details_field, "")).strip()
+            msg = str(next((txn.get(key) for key in possible_keys if key in txn and txn[key] is not None), "")).strip()
             if not msg:
                 continue
 

@@ -148,15 +148,13 @@ class HttpClient:
                         "data":        None,
                     }
 
-            # ── Decidir si reintentar ────────────────────────────────────────
             status_code = last_result["status_code"]
 
             if not self._should_retry(status_code):
-                # Error no retriable (400, 401, 403, 404, 500...) → fallo inmediato
                 return last_result
 
             if attempt < self._max_retries:
-                wait = self._backoff * (2 ** attempt)  # 1s, 2s, 4s ...
+                wait = self._backoff * (2 ** attempt)
                 logger.warning(
                     f"[HttpClient] Reintento {attempt + 1}/{self._max_retries} "
                     f"en {wait:.1f}s para {url}... (status={status_code})"
