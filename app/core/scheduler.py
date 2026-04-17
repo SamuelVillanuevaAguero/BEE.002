@@ -10,10 +10,6 @@ from app.db.session import engine
 
 logger = logging.getLogger(__name__)
 
-# ── Jobstore: APScheduler stores jobs in MySQL ────────────────────────────
-'''jobstores = {
-    "default": SQLAlchemyJobStore(url=settings.DATABASE_URL, tablename="apscheduler_jobs")
-}'''
 jobstores = {
     "default": SQLAlchemyJobStore(engine=engine, tablename="apscheduler_jobs")
 }

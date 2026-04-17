@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/rpa", tags=["RPA"])
 
-# ── Execution response example ────────────────────────────────────────────────
 _EXECUTION_EXAMPLE = {
     "success": True,
     "message": "Execution start received for 'AEC.001'.",

@@ -8,9 +8,9 @@ from pydantic import BaseModel, Field
 
 class ClientFragment(BaseModel):
     """
-    Fragmento de cliente en el payload atómico.
-    Si id es null o vacío → se crea un cliente nuevo con name.
-    Si id tiene valor → se usa el cliente existente.
+    Client fragment in the atomic payload.
+    If id is null or empty → a new client is created with name.
+    If id has a value → the existing client is used.
     """
     id: Optional[str] = Field(default=None, description="ID del cliente. Null = crear nuevo.")
     name: Optional[str] = Field(default=None, max_length=150, description="Nombre del cliente (requerido si id es null).")

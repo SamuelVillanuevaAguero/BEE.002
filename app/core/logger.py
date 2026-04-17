@@ -1,10 +1,4 @@
 import logging
-from app.middlewares.observability import correlation_id_var
-
-class CorrelationIdFilter(logging.Filter):
-    def filter(self, record):
-        record.correlation_id = correlation_id_var.get() or "N/A"
-        return True
 
 def setup_logging():
     logger = logging.getLogger()
@@ -20,4 +14,3 @@ def setup_logging():
     )
     logHandler.setFormatter(formatter)
     logger.addHandler(logHandler)
-    logger.addFilter(CorrelationIdFilter())
