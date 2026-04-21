@@ -291,183 +291,193 @@ class MonitoringPatch(BaseModel):
 # ── Response schemas (from_attributes=True, SIN extra=forbid) ────────────────
 
 class ClientResponse(BaseModel):
-    id: str
-    client_name: str
-    model_config = {
-        "from_attributes": True,
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "id": "550e8400-e29b-41d4-a716-446655440000",
-                    "client_name": "Empresa ABC",
-                }
-            ]
-        },
-    }
+    id: str = Field(
+        ...,
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+        description="UUID único del cliente",
+    )
+    client_name: str = Field(
+        ...,
+        examples=["Empresa ABC"],
+        description="Nombre del cliente",
+    )
+    model_config = {"from_attributes": True}
 
 
 class JobSummaryResponse(BaseModel):
-    id: str
-    name: str
-    status: str
-    trigger_type: str
-    trigger_args: Dict[str, Any]
-    next_run_time: Optional[datetime] = None
-    model_config = {
-        "from_attributes": True,
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                    "name": "bee-informa | AEC.001",
-                    "status": "paused",
-                    "trigger_type": "interval",
-                    "trigger_args": {"minutes": 5},
-                    "next_run_time": None,
-                }
-            ]
-        },
-    }
+    id: str = Field(
+        ...,
+        examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
+        description="UUID del job en APScheduler",
+    )
+    name: str = Field(
+        ...,
+        examples=["bee-informa | AEC.001"],
+        description="Nombre del job",
+    )
+    status: str = Field(
+        ...,
+        examples=["paused"],
+        description="Estado: paused, running, etc.",
+    )
+    trigger_type: str = Field(
+        ...,
+        examples=["interval"],
+        description="Tipo de trigger: interval, cron, date, etc.",
+    )
+    trigger_args: Dict[str, Any] = Field(
+        ...,
+        examples=[{"minutes": 5}],
+        description="Argumentos del trigger",
+    )
+    next_run_time: Optional[datetime] = Field(
+        default=None,
+        examples=[None],
+        description="Próxima ejecución (None si paused)",
+    )
+    model_config = {"from_attributes": True}
 
 
 class MonitoringResponse(BaseModel):
-    id: str
-    id_beecker: Optional[str] = None
-    uipath_robot_name: Optional[str] = None
-    monitor_type: MonitorType
-    slack_channel: Optional[str] = None
-    transaction_unit: Optional[str] = None
-    roc_agents: Optional[List[str]] = None
-    manage_flags: Optional[dict] = None
-    id_scheduler_job: Optional[str] = None
-    job: Optional[JobSummaryResponse] = None
-    model_config = {
-        "from_attributes": True,
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "id": "a1b2c3d4-0000-0000-0000-000000000001",
-                    "id_beecker": "AEC.001",
-                    "monitor_type": "bee_informa",
-                    "slack_channel": "#roc-notificaciones",
-                    "transaction_unit": "Facturas|Factura",
-                    "roc_agents": ["agente@empresa.com"],
-                    "manage_flags": _MANAGE_FLAGS_EXAMPLE,
-                    "id_scheduler_job": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                    "job": {
-                        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                        "name": "bee-informa | AEC.001",
-                        "status": "paused",
-                        "trigger_type": "interval",
-                        "trigger_args": {"minutes": 5},
-                        "next_run_time": None,
-                    },
-                }
-            ]
-        },
-    }
+    id: str = Field(
+        ...,
+        examples=["a1b2c3d4-0000-0000-0000-000000000001"],
+        description="UUID del registro de monitoring",
+    )
+    id_beecker: Optional[str] = Field(
+        default=None,
+        examples=["AEC.001"],
+        description="ID del bot Dashboard (null si es UiPath)",
+    )
+    uipath_robot_name: Optional[str] = Field(
+        default=None,
+        examples=["Robot_Ventas_01"],
+        description="Nombre del robot UiPath (null si es Dashboard)",
+    )
+    monitor_type: MonitorType = Field(
+        ...,
+        examples=["bee_informa"],
+        description="Tipo de monitoring",
+    )
+    slack_channel: Optional[str] = Field(
+        default=None,
+        examples=["#roc-notificaciones"],
+        description="Canal Slack de destino",
+    )
+    transaction_unit: Optional[str] = Field(
+        default=None,
+        examples=["Facturas|Factura"],
+        description="Unidades transaccionales separadas por |",
+    )
+    roc_agents: Optional[List[str]] = Field(
+        default=None,
+        examples=[["agente@empresa.com"]],
+        description="Lista de emails de agentes ROC",
+    )
+    manage_flags: Optional[dict] = Field(
+        default=None,
+        examples=[{"start_active": True, "end_active": True}],
+        description="Flags de configuración del monitoring",
+    )
+    id_scheduler_job: Optional[str] = Field(
+        default=None,
+        examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
+        description="UUID del job si está vinculado",
+    )
+    job: Optional[JobSummaryResponse] = Field(
+        default=None,
+        description="Objeto del job si existe",
+    )
+    model_config = {"from_attributes": True}
 
 
 class RPADashboardResponse(BaseModel):
-    id_beecker: str
-    id_dashboard: str
-    process_name: str
-    platform: PlatformType
-    id_client: str
-    business_errors: Optional[List[str]] = None
-    model_config = {
-        "from_attributes": True,
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "id_beecker": "AEC.001",
-                    "id_dashboard": "114",
-                    "process_name": "Automatización Cuentas por Cobrar",
-                    "platform": "cloud",
-                    "id_client": "550e8400-e29b-41d4-a716-446655440000",
-                    "business_errors": ["Business Exception", "Application Exception"],
-                }
-            ]
-        },
-    }
+    id_beecker: str = Field(
+        ...,
+        max_length=10,
+        examples=["AEC.001"],
+        description="Identificador ROC del bot",
+    )
+    id_dashboard: str = Field(
+        ...,
+        max_length=40,
+        examples=["114"],
+        description="ID numérico para la API de Beecker",
+    )
+    process_name: str = Field(
+        ...,
+        max_length=200,
+        examples=["Automatización Cuentas por Cobrar"],
+        description="Nombre del proceso",
+    )
+    platform: PlatformType = Field(
+        ...,
+        examples=["cloud"],
+        description="Plataforma del bot",
+    )
+    id_client: str = Field(
+        ...,
+        max_length=100,
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+        description="UUID del cliente propietario",
+    )
+    business_errors: Optional[List[str]] = Field(
+        default=None,
+        examples=[["Business Exception", "Application Exception"]],
+        description="Errores de negocio del bot",
+    )
+    model_config = {"from_attributes": True}
 
 
 class RPAUiPathResponse(BaseModel):
-    uipath_robot_name: str
-    id_beecker: Optional[str] = None
-    beecker_name: str
-    framework: str
-    id_client: str
-    business_errors: Optional[List[str]] = None
-    model_config = {
-        "from_attributes": True,
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "uipath_robot_name": "Robot_Ventas_01",
-                    "id_beecker": "VNT.001",
-                    "beecker_name": "Bot Ventas",
-                    "framework": "REFramework",
-                    "id_client": "550e8400-e29b-41d4-a716-446655440000",
-                    "business_errors": ["Business Rule Violation"],
-                }
-            ]
-        },
-    }
+    uipath_robot_name: str = Field(
+        ...,
+        max_length=100,
+        examples=["Robot_Ventas_01"],
+        description="Nombre del robot UiPath",
+    )
+    id_beecker: Optional[str] = Field(
+        default=None,
+        max_length=40,
+        examples=["VNT.001"],
+        description="Identificador ROC opcional",
+    )
+    beecker_name: str = Field(
+        ...,
+        max_length=200,
+        examples=["Bot Ventas"],
+        description="Nombre amigable del bot",
+    )
+    framework: str = Field(
+        ...,
+        max_length=100,
+        examples=["REFramework"],
+        description="Framework usado (ej: REFramework)",
+    )
+    id_client: str = Field(
+        ...,
+        max_length=100,
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+        description="UUID del cliente propietario",
+    )
+    business_errors: Optional[List[str]] = Field(
+        default=None,
+        examples=[["Business Rule Violation"]],
+        description="Errores de negocio del bot",
+    )
+    model_config = {"from_attributes": True}
 
 
 class AtomicCreateResponse(BaseModel):
-    client: ClientResponse
-    rpa: RPADashboardResponse | RPAUiPathResponse
-    monitoring: MonitoringResponse
-    job: Optional[JobSummaryResponse] = None
+    client: ClientResponse = Field(..., description="Cliente creado o reutilizado")
+    rpa: RPADashboardResponse | RPAUiPathResponse = Field(..., description="Bot creado o reutilizado")
+    monitoring: MonitoringResponse = Field(..., description="Monitoring creado")
+    job: Optional[JobSummaryResponse] = Field(
+        default=None,
+        description="Job creado si fue solicitado en el payload",
+    )
 
-    model_config = {
-        "from_attributes": True,
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "client": {
-                        "id": "550e8400-e29b-41d4-a716-446655440000",
-                        "client_name": "Empresa ABC",
-                    },
-                    "rpa": {
-                        "id_beecker": "AEC.001",
-                        "id_dashboard": "114",
-                        "process_name": "Automatización Cuentas por Cobrar",
-                        "platform": "cloud",
-                        "id_client": "550e8400-e29b-41d4-a716-446655440000",
-                        "business_errors": ["Business Exception"],
-                    },
-                    "monitoring": {
-                        "id": "a1b2c3d4-0000-0000-0000-000000000001",
-                        "monitor_type": "bee_informa",
-                        "slack_channel": "#roc-notificaciones",
-                        "transaction_unit": "Facturas|Factura",
-                        "roc_agents": ["agente@empresa.com"],
-                        "manage_flags": _MANAGE_FLAGS_EXAMPLE,
-                        "id_scheduler_job": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                        "job": {
-                            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                            "name": "bee-informa | AEC.001",
-                            "status": "paused",
-                            "trigger_type": "interval",
-                            "trigger_args": {"minutes": 5},
-                            "next_run_time": None,
-                        },
-                    },
-                    "job": {
-                        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                        "name": "bee-informa | AEC.001",
-                        "status": "paused",
-                        "trigger_type": "interval",
-                        "trigger_args": {"minutes": 5},
-                        "next_run_time": None,
-                    },
-                }
-            ]
-        }
-    }
+    model_config = {"from_attributes": True}
 
 
 # ── Schemas del endpoint CRUD /rpa-dashboard ──────────────────────────────────

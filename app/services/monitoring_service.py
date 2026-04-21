@@ -45,9 +45,9 @@ from app.services.freshdesk.freshdesk_api import FreshDeskAPI, FreshDeskAuthenti
 from app.services.slack.slack_api import SlackAPI, SlackErrorAuthenticate
 from app.services.config.rpa_config import RPAConfig
 from app.services.config.agent_config import AgentConfig
-from app.services.slack_message_builder import RPAMessageBuilder
-from app.services.agent_message_builder import AgentMessageBuilder
-from app.services.chart_builder import RPAChartBuilder, AgentChartBuilder
+from app.services.slack.slack_message_builder_rpa import RPAMessageBuilder
+from app.services.slack.slack_message_builder_agents import AgentMessageBuilder
+from app.services.slack.chart_builder import RPAChartBuilder, AgentChartBuilder
 from app.services.beecker.beecker_api import RunNotYetAvailableError
 
 load_dotenv()

@@ -289,8 +289,28 @@ def create_rpa_uipath_atomic(db: Session, payload: RPAUiPathAtomicCreate) -> dic
 
 # ── GET: General listings ────────────────────────────────────────────────────
 
-def list_rpa_dashboards(db: Session) -> list:
-    return db.query(RPADashboard).order_by(RPADashboard.id_beecker).all()
+def list_rpa_dashboards(db: Session, page: int = 1, page_size: int = 20) -> dict:
+    query = db.query(RPADashboard)
+    total = query.count()
+    
+    offset = (page - 1) * page_size
+    items = (
+        query.options(
+            joinedload(RPADashboard.client),
+            joinedload(RPADashboard.scheduled_monitoring).joinedload(RPADashboardMonitoring.job)
+        )
+        .order_by(RPADashboard.id_beecker)
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+    
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": items
+    }
 
 
 def list_rpa_uipath(db: Session) -> list:

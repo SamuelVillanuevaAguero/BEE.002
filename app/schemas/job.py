@@ -127,10 +127,3 @@ class ExecutionResponse(BaseModel):
     output: str | None
     error: str | None
     model_config = {"from_attributes": True}
-
-
-class PaginatedExecutions(BaseModel):
-    total: int
-    page: int
-    page_size: int
-    items: list[ExecutionResponse]

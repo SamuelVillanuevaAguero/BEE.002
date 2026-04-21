@@ -4,14 +4,14 @@ from sqlalchemy import (
     JSON,
     Enum,
     ForeignKey,
-    Integer,
-    String,
+    String
 )
 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 from app.models.job import Job
+from app.models.client import Client
 
 
 class PlatformType(str, enum.Enum):
@@ -23,18 +23,6 @@ class MonitorType(str, enum.Enum):
     bee_observa = "bee-observa"
     bee_informa = "bee-informa"
     bee_comunica = "bee-comunica"
-
-
-class Client(Base):
-    __tablename__ = "client"
-
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    client_name: Mapped[str] = mapped_column(String(150), nullable=False, unique=True)
-    id_freshdesk: Mapped[str] = mapped_column(String(15), nullable=False, unique=True)
-    id_beecker: Mapped[str] = mapped_column(String(4), nullable=False, unique=True)
-
-    rpa_dashboard: Mapped[list["RPADashboard"]] = relationship(back_populates="client")
-    rpa_uipath: Mapped[list["RPAUiPath"]] = relationship(back_populates="client")
 
 
 class RPADashboard(Base):

@@ -8,7 +8,7 @@ from fastapi import APIRouter
 from app.routes.monitoring import rpa, agent
 from app.routes.jobs import jobs, executions
 from app.routes import clients
-from app.routes.rpa_dashboard import dashboard_router, uipath_router
+from app.routes.automations import dashboard_router, uipath_router
 
 router = APIRouter()
 
