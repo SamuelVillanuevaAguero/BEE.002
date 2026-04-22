@@ -144,6 +144,7 @@ class RPAConfig:
     enable_freshdesk_link: bool = True
     enable_chart: bool = False
     enable_tag_agents: bool = True
+    group_by_column: Optional[str] = None
 
     business_errors: List[str] = field(default_factory=list)
 

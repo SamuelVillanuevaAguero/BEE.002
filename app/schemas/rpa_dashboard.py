@@ -157,6 +157,9 @@ class RPADashboardAtomicCreate(BaseModel):
     roc_agents: Optional[List[str]] = None
     manage_flags: Optional[ManageFlagsSchema] = None
     business_errors: Optional[List[str]] = None
+    group_by_column: str | None = Field(
+        default=None
+    )
     job: Optional[JobFragment] = None
 
     @field_validator("monitor_type", mode="before")
@@ -191,6 +194,7 @@ class RPADashboardAtomicCreate(BaseModel):
                     "roc_agents": ["agente@empresa.com"],
                     "manage_flags": _MANAGE_FLAGS_EXAMPLE,
                     "business_errors": ["Business Exception", "Application Exception"],
+                    "group_by_column" : "columna1",
                     "job": {
                         "name": "bee-informa | AEC.001",
                         "trigger_type": "interval",
@@ -211,6 +215,9 @@ class RPAUiPathAtomicCreate(BaseModel):
     roc_agents: Optional[List[str]] = None
     manage_flags: Optional[ManageFlagsSchema] = None
     business_errors: Optional[List[str]] = None
+    group_by_column: str | None = Field(
+        default=None
+    )
     job: Optional[JobFragment] = None
 
     @field_validator("monitor_type", mode="before")
@@ -245,6 +252,7 @@ class RPAUiPathAtomicCreate(BaseModel):
                     "roc_agents": ["roc@empresa.com"],
                     "manage_flags": _MANAGE_FLAGS_EXAMPLE,
                     "business_errors": ["Business Rule Violation"],
+                    "group_by_column" : "columna1",
                     "job": {
                         "name": "bee-informa | Robot_Ventas_01",
                         "trigger_type": "interval",
@@ -426,6 +434,9 @@ class RPADashboardResponse(BaseModel):
         examples=[["Business Exception", "Application Exception"]],
         description="Errores de negocio del bot",
     )
+    group_by_column: str | None = Field(
+        default=None
+    )
     model_config = {"from_attributes": True}
 
 
@@ -465,6 +476,9 @@ class RPAUiPathResponse(BaseModel):
         examples=[["Business Rule Violation"]],
         description="Errores de negocio del bot",
     )
+    group_by_column: str | None = Field(
+        default=None
+    )
     model_config = {"from_attributes": True}
 
 
@@ -489,6 +503,9 @@ class RPADashboardCreate(BaseModel):
     platform: PlatformType
     id_client: str = Field(..., max_length=100)
     business_errors: Optional[List[str]] = None
+    group_by_column: str | None = Field(
+        default=None
+    )
     model_config = {"extra": "forbid"}
 
 
@@ -497,6 +514,9 @@ class RPADashboardUpdate(BaseModel):
     platform: Optional[PlatformType] = None
     id_client: Optional[str] = Field(None, max_length=100)
     business_errors: Optional[List[str]] = None
+    group_by_column: str | None = Field(
+        default=None
+    )
     model_config = {"extra": "forbid"}
 
 

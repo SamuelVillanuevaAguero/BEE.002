@@ -913,6 +913,7 @@ class BeeckerAPI:
         status_field: str = "status",
         details_field: str = "details",
         failed_value: str = "failed",
+        group_by_column: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Devuelve un snapshot completo del estado de una ejecución RPA.
@@ -947,6 +948,7 @@ class BeeckerAPI:
                 "reference_avg_minutes":       float | None,
                 "overtime_flag":               bool | None,
                 "error_groups":                list[dict],
+                "grouped_transactions":        dict[str, dict] | None
             }
         """
         
@@ -1040,6 +1042,15 @@ class BeeckerAPI:
                 failed_value=failed_value,
                 threshold=similarity_threshold,
             )
+
+            grouped_transactions: Optional[Dict[str, Any]] = None
+            if group_by_column:
+                grouped_transactions = self._compute_grouped_transactions(
+                    transactions=all_transactions,
+                    group_by_column=group_by_column,
+                    status_field=status_field,
+                    failed_value=failed_value,
+                )
  
             return {
                 "run_id":                      run_id,
@@ -1058,6 +1069,7 @@ class BeeckerAPI:
                 "reference_avg_minutes":       reference_avg,
                 "overtime_flag":               overtime_flag,
                 "error_groups":                error_groups,
+                "grouped_transactions":        grouped_transactions
             }
  
         except BeeckerAPIError:
@@ -1150,4 +1162,53 @@ class BeeckerAPI:
                 })
 
         groups.sort(key=lambda g: g["count"], reverse=True)
+        return groups
+    
+    def _compute_grouped_transactions(
+        self,
+        transactions: List[Dict],
+        group_by_column: str,
+        status_field: str,
+        failed_value: str,
+    ) -> Dict[str, Dict[str, int]]:
+        """
+        Group transaction counts by the values of a specific column.
+
+        For each unique value found in `group_by_column`, counts how many
+        transactions are completed, failed, and pending (new).
+
+        Args:
+            transactions:    Full list of raw transactions from get_all_transactions().
+            group_by_column: Column name to group by (e.g. "Bank", "interline sector").
+            status_field:    Name of the status column (default: "status").
+            failed_value:    The value that represents a failed transaction.
+
+        Returns:
+            Ordered dict of {group_value: {"completed": int, "failed": int, "new": int}}.
+            Preserves insertion order (order of first appearance in transactions list).
+        """
+        col = group_by_column.lower()
+        groups: Dict[str, Dict[str, int]] = {}
+
+        for txn in transactions:
+            group_val = None
+            for key, val in txn.items():
+                if key.lower() == col:
+                    group_val = str(val).strip() if val is not None else ""
+                    break
+
+            if group_val is None:
+                group_val = "(sin grupo)"
+
+            if group_val not in groups:
+                groups[group_val] = {"completed": 0, "failed": 0, "new": 0}
+
+            raw_status = (txn.get(status_field) or "").lower().strip()
+            if raw_status == "completed":
+                groups[group_val]["completed"] += 1
+            elif raw_status == failed_value.lower():
+                groups[group_val]["failed"] += 1
+            else:
+                groups[group_val]["new"] += 1
+
         return groups

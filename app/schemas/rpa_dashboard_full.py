@@ -133,6 +133,9 @@ class RPAInline(BaseModel):
         examples=["Procesamiento de complementos de pago"],
     )
     platform: Optional[PlatformType] = None
+    group_by_column: str | None = Field(
+        default=None
+    )
 
     @field_validator("id_dashboard", "id_beecker", "process_name", mode="before")
     @classmethod
@@ -230,6 +233,9 @@ class RPADashboardFullResponse(BaseModel):
     process_name: str
     platform: PlatformType
     business_errors: Optional[List[str]] = None
+    group_by_column: str | None = Field(
+        default=None
+    )
     monitoring: MonitoringResponse
     job_created: bool = Field(
         default=False,

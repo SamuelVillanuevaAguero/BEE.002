@@ -561,3 +561,38 @@ def pause_observa_job(
         f"job_id={job_id} | last_run_id={finished_run_id}"
     )
     return True
+
+def recover_all_jobs(db: Session) -> dict:
+    """
+    Re-registers all jobs from the DB into APScheduler.
+    Used to recover from apscheduler_jobs table data loss.
+    """
+    jobs = db.query(Job).all()
+    recovered, failed = [], []
+
+    for j in jobs:
+        try:
+            trigger = _build_trigger(j.trigger_type, j.trigger_args)
+            scheduler.add_job(
+                func=j.task_path,
+                trigger=trigger,
+                id=j.id,
+                name=j.name,
+                kwargs={"job_id": j.id, "task_path": j.task_path, **j.job_kwargs},
+                replace_existing=True,
+            )
+            scheduler.pause_job(j.id)
+            j.status = JobStatus.paused
+            recovered.append(j.id)
+        except Exception as e:
+            logger.error(f"❌ [RECOVER] Error re-registering job {j.id}: {e}")
+            failed.append({"id": j.id, "error": str(e)})
+
+    db.commit()
+    logger.info(f"✅ [RECOVER] {len(recovered)} jobs re-registered, {len(failed)} failed.")
+    return {
+        "recovered": len(recovered),
+        "failed": len(failed),
+        "recovered_ids": recovered,
+        "failed_details": failed,
+    }

@@ -147,10 +147,11 @@ class MessageContext:
     transaction_unit_singular: str
     greeting: str
     run_id: Optional[str] = None
-    show_error_groups: bool = True,
-    enable_tag_agents: bool = True,
+    show_error_groups: bool = True
+    enable_tag_agents: bool = True
+    group_by_column: Optional[str] = None
     max_error_groups: Optional[int] = None
-    mention_user_ids: List[str] = field(default_factory=list)
+    mention_user_ids: List[str] = field(default_factory=list),
     freshdesk_url: Optional[str] = None
 
 
@@ -211,12 +212,16 @@ class _BaseMessageBuilder:
         status: dict, unit_plural: str, unit_singular: str
     ) -> list[str]:
         """Generate summary lines describing processed transactions."""
+
+        if status.get("grouped_transactions"):
+            return _BaseMessageBuilder._transaction_summary_grouped(
+                status, unit_plural, unit_singular
+            )
+        
         total     = status.get("total_transactions", 0)
         completed = status.get("completed_transactions", 0)
         failed    = status.get("failed_transactions", 0)
         pending   = max(0, total - completed - failed)
-
-        #unit = unit_plural if total != 1 else unit_singular
 
         lines = [f"Resumen Transaccional:" if total > 0 else ""]
 
@@ -233,6 +238,53 @@ class _BaseMessageBuilder:
             details.append(f"➤ {pending} {unit_p} `new`")
         if details:
             lines.append(f"{'\n'.join(details)}")
+
+        return lines
+    
+    @staticmethod
+    def _transaction_summary_grouped(
+        status: dict,
+        unit_plural: str,
+        unit_singular: str,
+    ) -> list[str]:
+        """
+        Generate grouped transaction summary lines when group_by_column is active.
+
+        Produces:
+            Resumen Transaccional:
+            ➤ 16 Reportes procesados
+
+            Reportes por Bank - BBVA:
+            ➤ 5 Reportes `completed`
+            ➤ 1 Reporte `new`
+
+            Reportes por Bank - Banamex:
+            ➤ 5 Reportes `completed`
+            ➤ 5 Reportes `failed`
+        """
+        total     = status.get("total_transactions", 0)
+        grouped   = status.get("grouped_transactions", {})
+
+        unit_label = unit_singular if total == 1 else unit_plural
+        lines = []
+
+        for group_name, counts in grouped.items():
+            completed = counts.get("completed", 0)
+            failed    = counts.get("failed", 0)
+            new       = counts.get("new", 0)
+
+            lines.append("")
+            lines.append(f"*{unit_plural} por {group_name}:*")
+
+            if completed > 0:
+                u = unit_singular if completed == 1 else unit_plural
+                lines.append(f"➤ {completed} {u} `completed`")
+            if failed > 0:
+                u = unit_singular if failed == 1 else unit_plural
+                lines.append(f"➤ {failed} {u} `failed`")
+            if new > 0:
+                u = unit_singular if new == 1 else unit_plural
+                lines.append(f"➤ {new} {u} `new`")
 
         return lines
 
@@ -527,6 +579,7 @@ class RPAMessageBuilder:
         max_error_groups: Optional[int] = None,
         mention_user_ids: Optional[List[str]] = None,
         freshdesk_url: Optional[str] = None,
+        group_by_column: Optional[str] = None
     ) -> str:
         """
         Build the Slack message representing the current RPA execution state.
@@ -553,6 +606,7 @@ class RPAMessageBuilder:
             max_error_groups=max_error_groups,
             mention_user_ids=mention_user_ids or [],
             freshdesk_url=freshdesk_url,
+            group_by_column=group_by_column
         )
 
         return builder.build(ctx)
@@ -569,6 +623,7 @@ class RPAMessageBuilder:
         max_error_groups: Optional[int] = None,
         mention_user_ids: Optional[List[str]] = None,
         freshdesk_url: Optional[str] = None,
+        group_by_column: Optional[str] = None
     ) -> str:
         """
         Build a fused message containing multiple execution status blocks.
@@ -599,6 +654,7 @@ class RPAMessageBuilder:
                 max_error_groups=max_error_groups,
                 mention_user_ids=mentions,
                 freshdesk_url=freshdesk_url,
+                group_by_column=group_by_column
             )
             blocks.append(builder.build(ctx))
 

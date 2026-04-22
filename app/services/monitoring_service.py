@@ -359,7 +359,11 @@ class MonitoringAgent:
             config = self.__rpa_config
 
             # 1. Get full status from Beecker
-            status = await self.__api_beecker.get_rpa_status(run_id=run_id, bot_id=bot_id)
+            status = await self.__api_beecker.get_rpa_status(
+                run_id=run_id,
+                bot_id=bot_id,
+                group_by_column=config.group_by_column,
+            )
 
             # 2. Apply overtime flag
             if not config.enable_overtime_check:
@@ -367,17 +371,34 @@ class MonitoringAgent:
 
             # 3. Calculate if tags should be suppressed (all errors are business)
             error_groups = status.get("error_groups", [])
+            run_state_lower = (status.get("run_state") or "").lower()
+            execution_detail = status.get("details", "")
+
+            suppress_execution_level = (
+                not error_groups
+                and run_state_lower == "failed"
+                and bool(execution_detail)
+                and _is_business_error(execution_detail, config.business_errors)
+            )
+
             effective_mentions = (
                 []
-                if (not config.enable_tag_agents or
-                    _should_suppress_mentions(error_groups, config.business_errors))
+                if (
+                    not config.enable_tag_agents
+                    or _should_suppress_mentions(error_groups, config.business_errors)
+                    or suppress_execution_level
+                )
                 else self._mention_ids
             )
             if not effective_mentions and self._mention_ids:
+                reason = (
+                    "ejecución crítica con error de negocio"
+                    if suppress_execution_level
+                    else "todos los errores son de negocio"
+                )
                 logger.info(
-                    f"🔕 [MENTIONS] Tag suprimido — todos los errores son de negocio | "
-                    f"run_id={run_id} | bot_id={bot_id} | "
-                    f"grupos={[g.get('representative', g.get('description', '')) for g in error_groups]}"
+                    f"🔕 [MENTIONS] Tag suprimido — {reason} | "
+                    f"run_id={run_id} | bot_id={bot_id}"
                 )
 
             # 4. Build message
@@ -392,6 +413,7 @@ class MonitoringAgent:
                 max_error_groups=config.max_error_groups,
                 mention_user_ids=effective_mentions,
                 freshdesk_url=self._get_effective_freshdesk_url(),
+                group_by_column=config.group_by_column
             )
 
             # 5. Send text message
@@ -457,7 +479,11 @@ class MonitoringAgent:
 
             async def _fetch_one(rid: int) -> dict | None:
                 try:
-                    s = await self.__api_beecker.get_rpa_status(run_id=rid, bot_id=bot_id)
+                    s = await self.__api_beecker.get_rpa_status(
+                        run_id=rid,
+                        bot_id=bot_id,
+                        group_by_column=config.group_by_column,
+                    )
                     if not config.enable_overtime_check:
                         s = {**s, "overtime_flag": False}
                     return s
@@ -505,8 +531,23 @@ class MonitoringAgent:
             )
 
             suppress_flag_disabled = not config.enable_tag_agents
-            suppress_business = _should_suppress_mentions(all_error_groups, config.business_errors)
-            # Anti-spam: hay grupos de error pero ninguno es nuevo
+            #suppress_business = _should_suppress_mentions(all_error_groups, config.business_errors)
+            execution_level_details = [
+                s.get("details", "")
+                for s in status_list
+                if s.get("run_state", "").lower() == "failed" and s.get("details")
+            ]
+
+            suppress_business = _should_suppress_mentions(
+                all_error_groups, config.business_errors
+            ) or (
+                not all_error_groups
+                and bool(execution_level_details)
+                and all(
+                    _is_business_error(detail, config.business_errors)
+                    for detail in execution_level_details
+                )
+            )
             suppress_seen = bool(current_representatives) and not has_new_errors
 
             if suppress_flag_disabled:
@@ -549,6 +590,7 @@ class MonitoringAgent:
                 max_error_groups=config.max_error_groups,
                 mention_user_ids=effective_mentions,
                 freshdesk_url=self._get_effective_freshdesk_url(),
+                group_by_column=config.group_by_column
             )
 
             # 4. Send message

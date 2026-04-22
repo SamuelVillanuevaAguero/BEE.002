@@ -174,6 +174,7 @@ def _build_config(relation: RPADashboardMonitoring) -> RPAConfig:
         # FreshDesk
         freshdesk_company_id=freshdesk_company_id,
         business_errors=rpa.business_errors or [],
+        group_by_column=rpa.group_by_column
     )
 
 

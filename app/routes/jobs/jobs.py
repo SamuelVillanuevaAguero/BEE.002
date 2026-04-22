@@ -92,6 +92,18 @@ async def trigger_job(job_id: str, db: Session = Depends(get_db)):
     job = await job_service.get_job(db, job_id)
     return {"message": f"Job '{job.name}' triggered manually"}
 
+@router.post(
+    "/recover",
+    summary="Re-register all jobs in APScheduler",
+    description="Reads all jobs from DB and re-registers them in APScheduler as paused. Use after a scheduler data loss.",
+)
+def recover_jobs(
+    db: Session = Depends(get_db)
+):
+    from app.services import job_service
+    result = job_service.recover_all_jobs(db)
+    return result
+
 
 # ── History ───────────────────────────────────────────────────────────────────
 

@@ -34,10 +34,9 @@ class RPADashboard(Base):
     id_dashboard: Mapped[str] = mapped_column(String(40), nullable=False)
     process_name: Mapped[str] = mapped_column(String(200), nullable=False)
     platform: Mapped[PlatformType] = mapped_column(Enum(PlatformType), nullable=False)
-
     business_errors: Mapped[list | None] = mapped_column(JSON)
-
     id_client: Mapped[str] = mapped_column(ForeignKey("client.id"), nullable=False)
+    group_by_column: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     scheduled_monitoring: Mapped[list["RPADashboardMonitoring"]] = relationship(
         back_populates="rpa", cascade="all, delete"
