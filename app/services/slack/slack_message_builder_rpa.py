@@ -52,10 +52,11 @@ Example::
 from __future__ import annotations
 
 import random
+from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import List, Optional
-
+from typing import Dict, List, Optional, Tuple
+import app.services.freshdesk.freshdesk_api as freshdesk
 
 class ExecutionScenario(Enum):
     """Enumeration of possible monitored RPA execution scenarios."""
@@ -332,6 +333,76 @@ class _BaseMessageBuilder:
             return None
         return f"Tickets generados <{freshdesk_url}|FreshDesk>"
 
+    @staticmethod
+    def _extract_failed_tickets(transactions: List[Dict]) -> List[Tuple[str, str]]:
+        """
+        Extract (ticket_id, ticket_url) pairs from failed transactions.
+
+        A transaction is considered valid when:
+          - status == "failed"
+          - ticket_id is a non-empty string
+          - ticketurl contains a resolvable host (used to build the /a/tickets/ URL)
+
+        The raw `ticketurl` from the API uses the legacy `/helpdesk/tickets/` path.
+        This helper normalises it to the current agent format: `/a/tickets/{ticket_id}`.
+
+        Returns:
+            List of (ticket_id, full_url) tuples, in the order they appear in
+            `transactions`. Duplicates (same ticket_id) are preserved intentionally
+            because the caller decides how many to display.
+        """
+        result: List[Tuple[str, str]] = []
+        for txn in transactions:
+            status    = (txn.get("status") or "").lower().strip()
+            ticket_id = str(txn.get("ticket_id") or txn.get("ticket id") or "").strip()
+
+            if status != "failed" or not ticket_id:
+                continue
+
+            url = f"{freshdesk.URL_BASE}/helpdesk/tickets/{ticket_id}"
+            result.append((ticket_id, url))
+
+        return result
+
+    @staticmethod
+    def _freshdesk_section(
+        transactions: List[Dict],
+        freshdesk_url: Optional[str],
+    ) -> List[str]:
+        """
+        Build the FreshDesk lines for the Slack message.
+
+        Decision rules (applied in order):
+          1. 1–4 tickets with ticket_id → show individual clickable links.
+          2. >4 tickets with ticket_id   → show the client's general FreshDesk URL
+             (avoids flooding the message with links).
+          3. 0 tickets with ticket_id    → fall back to the client's general URL
+             when available (same behaviour as the previous _freshdesk_line).
+
+        Args:
+            transactions:  Raw transaction dicts from status_dict["raw_transactions"].
+                           Pass an empty list when not available.
+            freshdesk_url: Client-level FreshDesk URL (all open tickets).
+                           Built by build_freshdesk_ui_url() in freshdesk_api.py.
+
+        Returns:
+            List of Slack mrkdwn lines ready to be extended into the message.
+            Returns an empty list when nothing should be shown.
+        """
+        tickets = _BaseMessageBuilder._extract_failed_tickets(transactions)
+
+        if 1 <= len(tickets) <= 4:
+            lines = ["*Tickets generados:*"]
+            for ticket_id, url in tickets:
+                lines.append(f"➤ <{url}|Ticket #{ticket_id}>")
+            return lines
+
+        # >4 tickets or 0 tickets — fall back to the general client URL
+        if freshdesk_url:
+            return [f"Tickets generados <{freshdesk_url}|FreshDesk>"]
+
+        return []
+
 
 # ── Scenario builders ─────────────────────────────────────────────────────────
 
@@ -396,9 +467,13 @@ class PartialFailureBuilder(_BaseMessageBuilder):
         if mention and ctx.enable_tag_agents:
             lines.extend(["", mention])
 
-        freshdesk = self._freshdesk_line(ctx.freshdesk_url)
-        if freshdesk:
-            lines.extend(["", freshdesk])
+        freshdesk_lines = self._freshdesk_section(
+            transactions=ctx.status.get("raw_transactions", []),
+            freshdesk_url=ctx.freshdesk_url,
+        )
+        if freshdesk_lines:
+            lines.append("")
+            lines.extend(freshdesk_lines)
 
         return "\n".join(lines)
 
@@ -512,9 +587,13 @@ class OvertimeBuilder(_BaseMessageBuilder):
             if mention and ctx.enable_tag_agents:
                 lines.extend(["", mention])
 
-            freshdesk = self._freshdesk_line(ctx.freshdesk_url)
-            if freshdesk:
-                lines.extend(["", freshdesk])
+            freshdesk_lines = self._freshdesk_section(
+                transactions=ctx.status.get("raw_transactions", []),
+                freshdesk_url=ctx.freshdesk_url,
+            )
+            if freshdesk_lines:
+                lines.append("")
+                lines.extend(freshdesk_lines)
 
         return "\n".join(lines)
 

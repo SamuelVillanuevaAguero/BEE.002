@@ -8,7 +8,8 @@ from app.db.session import Base
 
 # Import all models so Alembic can detect them
 import app.models.job
-import app.models.automation
+import app.models.rpa_dashboard
+import app.models.rpa_uipath
 import app.models.client
 
 config = context.config

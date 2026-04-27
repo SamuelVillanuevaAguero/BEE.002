@@ -10,12 +10,7 @@ from typing import Optional, List
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.automation import (
-    RPADashboard,
-    RPADashboardMonitoring,
-    RPAUiPath,
-    RPAUiPathMonitoring,
-)
+from app.models.rpa_dashboard import RPADashboard, RPADashboardMonitoring\nfrom app.models.rpa_uipath import RPAUiPath, RPAUiPathMonitoring
 from app.repositories.automation_repository import (
     RPADashboardRepository,
     RPADashboardMonitoringRepository,

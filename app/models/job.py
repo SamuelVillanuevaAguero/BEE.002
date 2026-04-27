@@ -17,7 +17,8 @@ from app.db.session import Base
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.models.automation import RPADashboardMonitoring, RPAUiPathMonitoring
+    from app.models.rpa_dashboard import RPADashboardMonitoring
+    from app.models.rpa_uipath import RPAUiPathMonitoring
 
 
 class TriggerType(str, enum.Enum):

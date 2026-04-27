@@ -3,7 +3,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from app.models.automation import MonitorType, PlatformType
+from app.models.rpa_dashboard import MonitorType, PlatformType
 
 
 """Nested schemas"""

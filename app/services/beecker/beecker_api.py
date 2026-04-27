@@ -1069,7 +1069,8 @@ class BeeckerAPI:
                 "reference_avg_minutes":       reference_avg,
                 "overtime_flag":               overtime_flag,
                 "error_groups":                error_groups,
-                "grouped_transactions":        grouped_transactions
+                "grouped_transactions":        grouped_transactions,
+                "raw_transactions":            all_transactions
             }
  
         except BeeckerAPIError:

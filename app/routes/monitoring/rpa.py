@@ -11,7 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.automation import RPADashboard
+from app.models.rpa_dashboard import RPADashboard
 from app.schemas.rpa import RPAExecutionPayload, RPAExecutionUpdatePayload
 from app.schemas.response import ExecutionResponse
 from app.services import rpa_orchestration_service

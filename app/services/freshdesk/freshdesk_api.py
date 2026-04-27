@@ -1,6 +1,11 @@
 from urllib.parse import urlencode
 from app.utils.http_client import HttpClient
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
+
+URL_BASE = os.getenv("URL_FRESHDESK", None)
 
 class FreshDeskError(Exception):
     """Generic FreshDesk API error."""
@@ -24,7 +29,7 @@ class FreshDeskAPI:
     HTTP requests and translates API errors into domain-specific exceptions.
     """
 
-    URL_BASE = 'https://beeckercoams.freshdesk.com/api/v2'
+    URL_BASE = f'{URL_BASE}/api/v2'
 
     async def login(self, username: str, password: str) -> None:
         """
@@ -155,7 +160,7 @@ class FreshDeskAPI:
         str
             Fully constructed FreshDesk UI URL that can be opened in a browser.
         """
-        base_url = "https://beeckercoams.freshdesk.com/a/tickets/filters/search"
+        base_url = f"{URL_BASE}/a/tickets/filters/search"
 
         params = [
             ("orderBy", "created_at"),

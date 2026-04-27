@@ -9,7 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.automation import Client
+from app.models.client import Client
 from app.schemas.client import ClientCreate, ClientUpdate
 from app.repositories import ClientRepository
 

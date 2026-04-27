@@ -20,13 +20,15 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.automation import Client, RPADashboard, RPADashboardMonitoring
+from app.models.client import Client
+from app.models.rpa_dashboard import RPADashboard, RPADashboardMonitoring
 from app.models.job import JobStatus, TriggerType
 from app.schemas.client import ClientInlineResponse
 from app.schemas.rpa_dashboard_full import (
     ClientInline,
     RPADashboardFullCreate,
     RPADashboardFullResponse,
+    RPAInline
 )
 
 logger = logging.getLogger(__name__)
@@ -131,6 +133,7 @@ def _resolve_rpa(db: Session, rpa_payload) -> tuple[RPADashboard, bool]:
         platform=rpa_payload.platform,
         id_client="",
         business_errors=None,
+        group_by_column=rpa_payload.group_by_column
     )
     logger.info(f"🆕 Bot nuevo encolado | id_beecker='{rpa_payload.id_beecker}'")
     return rpa, True
@@ -192,7 +195,7 @@ def create_rpa_dashboard_full(
     rpa, rpa_created = _resolve_rpa(db, payload.rpa)
     if rpa_created:
         rpa.id_client = client.id
-        rpa.business_errors = payload.business_errors or None
+        rpa.business_errors = payload.rpa.business_errors or None
         db.add(rpa)
 
     # ── 5. Construir monitoring ───────────────────────────────────────────────
@@ -307,11 +310,14 @@ def create_rpa_dashboard_full(
             id_beecker=client.id_beecker,
             created=client_created,
         ),
-        id_beecker=rpa.id_beecker,
-        id_dashboard=rpa.id_dashboard,
-        process_name=rpa.process_name,
-        platform=rpa.platform,
-        business_errors=rpa.business_errors,
+        rpa=RPAInline(
+            id_beecker=rpa.id_beecker,
+            id_dashboard=rpa.id_dashboard,
+            process_name=rpa.process_name,
+            platform=rpa.platform,
+            group_by_column=rpa.group_by_column,
+            business_errors=rpa.business_errors,
+        ),
         monitoring={
             "id": mon.id,
             "id_rpa": mon.id_beecker,

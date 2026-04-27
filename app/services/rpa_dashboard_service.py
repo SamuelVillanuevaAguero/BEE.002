@@ -7,9 +7,9 @@ import uuid
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.automation import (
-    Client, RPADashboard, RPADashboardMonitoring, RPAUiPath, RPAUiPathMonitoring,
-)
+from app.models.client import Client
+from app.models.rpa_dashboard import RPADashboard, RPADashboardMonitoring
+from app.models.rpa_uipath import RPAUiPath, RPAUiPathMonitoring
 from app.models.job import Job, JobStatus, TriggerType
 from app.schemas.rpa_dashboard import (
     RPADashboardAtomicCreate, RPAUiPathAtomicCreate,
@@ -435,3 +435,5 @@ def _delete_monitoring_with_job(db: Session, mon) -> None:
     db.delete(mon)
     db.commit()
     logger.info(f"🗑️ Monitoring eliminado | id='{mon.id}'")
+
+

@@ -8,12 +8,8 @@ from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.automation import (
-    RPADashboard,
-    RPADashboardMonitoring,
-    RPAUiPath,
-    RPAUiPathMonitoring,
-)
+from app.models.rpa_dashboard import RPADashboard, RPADashboardMonitoring
+from app.models.rpa_uipath import RPAUiPath, RPAUiPathMonitoring
 from .base_repository import BaseRepository
 
 class RPADashboardRepository(BaseRepository[RPADashboard]):
@@ -331,3 +327,4 @@ class RPAUiPathMonitoringRepository(BaseRepository[RPAUiPathMonitoring]):
             RPAUiPathMonitoring.id_scheduler_job == id_scheduler_job
         )
         return self.db.execute(stmt).scalars().first()
+

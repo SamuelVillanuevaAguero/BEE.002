@@ -34,7 +34,7 @@ import logging
 
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.automation import MonitorType, RPADashboard, RPADashboardMonitoring
+from app.models.rpa_dashboard import MonitorType, RPADashboard, RPADashboardMonitoring
 from app.models.job import Job, JobStatus
 from app.services.beecker.beecker_api import BeeckerAPIError, RunNotYetAvailableError
 from app.services.config.rpa_config import RPAConfig

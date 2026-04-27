@@ -8,7 +8,7 @@ from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.automation import Client
+from app.models.client import Client
 from .base_repository import BaseRepository
 
 

@@ -22,7 +22,7 @@ router.include_router(executions.router)
 
 router.include_router(clients.router)
 router.include_router(dashboard_router)
-router.include_router(uipath_router)
+#router.include_router(uipath_router)
 
 @router.get("/health", tags=["Health"])
 def health():
