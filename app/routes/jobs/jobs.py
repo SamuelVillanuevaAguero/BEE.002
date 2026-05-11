@@ -30,11 +30,16 @@ async def create_job(payload: JobCreate, db: Session = Depends(get_db)):
 
 @router.get(
     path="/",
-    response_model=list[JobResponse]
+    response_model=PaginatedResponse[JobResponse]
 )
-async def list_jobs(status: JobStatus | None = Query(None, description="Filter by status"), db: Session = Depends(get_db)):
+async def list_jobs(
+    status: JobStatus | None = Query(None, description="Filter by status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
     """Lists all jobs (optionally filters by status)."""
-    return await job_service.list_jobs(db, status=status)
+    return await job_service.list_jobs(db, status=status, page=page, page_size=page_size)
 
 
 @router.get(

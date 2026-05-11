@@ -12,9 +12,10 @@ from app.models.rpa_dashboard import RPADashboard, RPADashboardMonitoring
 from app.models.rpa_uipath import RPAUiPath, RPAUiPathMonitoring
 from app.models.job import Job, JobStatus, TriggerType
 from app.schemas.rpa_dashboard import (
-    RPADashboardAtomicCreate, RPAUiPathAtomicCreate,
+    RPADashboardAtomicCreate,
     MonitoringPatch, JobFragment,
 )
+from app.schemas.rpa_uipath import RPAUiPathAtomicCreate
 from app.services.client_service import get_or_create_client
 
 logger = logging.getLogger(__name__)
@@ -321,11 +322,17 @@ def list_clients(db: Session) -> list:
     return db.query(Client).order_by(Client.client_name).all()
 
 
-def list_dashboard_errors(db: Session, id_beecker: str) -> list[str]:
+def list_dashboard_errors(
+    db: Session, id_beecker: str, page: int = 1, page_size: int = 20
+) -> dict:
     rpa = db.get(RPADashboard, id_beecker)
     if not rpa:
         raise HTTPException(status_code=404, detail=f"Bot '{id_beecker}' no encontrado.")
-    return rpa.business_errors or []
+    all_errors = rpa.business_errors or []
+    total = len(all_errors)
+    start = (page - 1) * page_size
+    items = all_errors[start : start + page_size]
+    return {"total": total, "page": page, "page_size": page_size, "items": items}
 
 
 def list_uipath_errors(db: Session, robot_name: str) -> list[str]:
@@ -337,35 +344,55 @@ def list_uipath_errors(db: Session, robot_name: str) -> list[str]:
 
 # ── GET: Monitors by bot ────────────────────────────────────────────────────
 
-def list_monitoring_by_id_beecker(db: Session, id_beecker: str) -> list[dict]:
-    """
-    Devuelve todos los monitoreos configurados para un bot Dashboard específico.
-    Lanza 404 si el bot no existe en rpa_dashboard.
-    Un mismo bot puede tener N configuraciones (canales, jobs y agentes distintos).
-    """
+def list_monitoring_by_id_beecker(
+    db: Session, id_beecker: str, page: int = 1, page_size: int = 20
+) -> dict:
     rpa = db.get(RPADashboard, id_beecker)
     if not rpa:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Bot '{id_beecker}' no encontrado en rpa_dashboard.",
         )
-    mons = (
+    query = (
         db.query(RPADashboardMonitoring)
         .filter(RPADashboardMonitoring.id_beecker == id_beecker)
+    )
+    total = query.count()
+    mons = (
+        query
+        .options(joinedload(RPADashboardMonitoring.job))
+        .order_by(RPADashboardMonitoring.id)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
         .all()
     )
-    return [_build_monitoring_response(m, m.job) for m in mons]
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": [_build_monitoring_response(m, m.job) for m in mons],
+    }
 
 
 # ── GET: Full monitor listings ──────────────────────────────────────────────
 
-def list_dashboard_monitoring(db: Session) -> list[dict]:
+def list_dashboard_monitoring(db: Session, page: int = 1, page_size: int = 20) -> dict:
+    query = db.query(RPADashboardMonitoring)
+    total = query.count()
     mons = (
-        db.query(RPADashboardMonitoring)
+        query
         .options(joinedload(RPADashboardMonitoring.job))
+        .order_by(RPADashboardMonitoring.id)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
         .all()
     )
-    return [_build_monitoring_response(m, m.job) for m in mons]
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": [_build_monitoring_response(m, m.job) for m in mons],
+    }
 
 
 def list_uipath_monitoring(db: Session) -> list[dict]:

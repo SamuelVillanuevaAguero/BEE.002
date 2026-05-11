@@ -423,13 +423,12 @@ class HappyPathBuilder(_BaseMessageBuilder):
         ]
 
         if completed >= 1:
-            lines.append(f"Se procesaron *{completed} {unit_completed}* correctamente. ✅")
+            lines.extend(self._transaction_summary(ctx.status, ctx.transaction_unit, ctx.transaction_unit_singular))
         else:
             lines.append(f"Aún no se han procesado *{ctx.transaction_unit}*" if ctx.status.get("run_state") in ["pending", "in progress"] else f"No sé procesaron *{ctx.transaction_unit}* en esta ejecución")
-
-        if pending > 0:
-            unit_p = ctx.transaction_unit_singular if pending == 1 else ctx.transaction_unit
-            lines.append(f"➤ {pending} {unit_p} `new`")
+            if pending > 0:
+                unit_p = ctx.transaction_unit_singular if pending == 1 else ctx.transaction_unit
+                lines.append(f"➤ {pending} {unit_p} `new`")
 
         lines.append("Sin errores reportados.")
         lines.append(self._timing_info(ctx.status))

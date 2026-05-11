@@ -3,7 +3,8 @@ app/routes/clients.py
 Client management routes with Repository pattern.
 """
 import logging
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
+from app.schemas.response import PaginatedResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -50,19 +51,20 @@ async def create_client(
 
 @router.get(
     "/",
-    response_model=list[ClientResponse],
+    response_model=PaginatedResponse[ClientResponse],
     summary="List clients",
     responses={
-        **R200_list(_CLIENT_LIST_EXAMPLE, "List of registered clients"),
         **COMMON,
     },
 )
 async def list_clients(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     api_key: str = Depends(verify_api_key),
 ):
     """Lists all clients ordered by name."""
-    return client_service.list_clients(db)
+    return client_service.list_clients(db, page=page, page_size=page_size)
 
 
 @router.get(

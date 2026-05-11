@@ -156,21 +156,15 @@ async def create_job(db: Session, payload: JobCreate) -> Job:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server error")
 
 
-async def list_jobs(db: Session, status: JobStatus | None = None) -> list[Job]:
-    """
-    List all jobs, optionally filtered by status.
-    Uses Repository pattern for data access.
-    
-    Args:
-        db: Database session
-        status: Optional JobStatus filter
-        
-    Returns:
-        List of Job instances
-    """
+async def list_jobs(db: Session, status: JobStatus | None = None, page: int = 1, page_size: int = 10) -> dict:
     try:
-        repo = JobRepository(db)
-        return repo.list_all(status=status)
+        from sqlalchemy import select, func
+        stmt = select(Job).order_by(Job.created_at.desc())
+        if status:
+            stmt = stmt.where(Job.status == status)
+        total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar()
+        items = db.execute(stmt.offset((page - 1) * page_size).limit(page_size)).scalars().all()
+        return {"total": total, "page": page, "page_size": page_size, "items": items}
     except HTTPException:
         raise
     except Exception as e:

@@ -11,6 +11,7 @@ import app.models.job
 import app.models.rpa_dashboard
 import app.models.rpa_uipath
 import app.models.client
+import app.models.agent_monitoring
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)

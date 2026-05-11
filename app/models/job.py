@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.rpa_dashboard import RPADashboardMonitoring
     from app.models.rpa_uipath import RPAUiPathMonitoring
+    from app.models.agent_monitoring import AgentMonitoring
 
 
 class TriggerType(str, enum.Enum):
@@ -74,6 +75,10 @@ class Job(Base):
     )
 
     rpa_uipath: Mapped["RPAUiPathMonitoring"] = relationship(
+        back_populates="job"
+    )
+
+    agent: Mapped["AgentMonitoring"] = relationship(
         back_populates="job"
     )
 

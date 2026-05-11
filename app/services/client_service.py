@@ -76,25 +76,28 @@ def create_client(db: Session, payload: ClientCreate) -> Client:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server error")
 
 
-def list_clients(db: Session) -> list[Client]:
+def list_clients(db: Session, page: int = 1, page_size: int = 10) -> dict:
     """
-    List all clients ordered by name using Repository pattern.
-    
+    List clients ordered by name with pagination.
+
     Args:
         db: Database session
-        
+        page: Page number (1-indexed)
+        page_size: Number of records per page
+
     Returns:
-        List of Client instances
+        PaginatedResponse dict with total, page, page_size and items
     """
     try:
-        repo = ClientRepository(db)
-        return repo.list_all()
+        query = db.query(Client).order_by(Client.client_name)
+        total = query.count()
+        items = query.offset((page - 1) * page_size).limit(page_size).all()
+        return {"total": total, "page": page, "page_size": page_size, "items": items}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error listing clients: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server error")
-
 
 def get_client(db: Session, client_id: str) -> Client:
     """

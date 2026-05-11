@@ -7,3 +7,4 @@ logs
 test.py
 .vscode
 certs/*
+test/*

@@ -27,13 +27,12 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.rpa_dashboard import (
     RPADashboardAtomicCreate,
-    RPAUiPathAtomicCreate,
     MonitoringPatch,
     RPADashboardResponse,
-    RPAUiPathResponse,
     MonitoringResponse,
     AtomicCreateResponse,
 )
+from app.schemas.rpa_uipath import RPAUiPathAtomicCreate, RPAUiPathResponse
 from app.schemas.response import PaginatedResponse
 from app.utils.responses import R200, R200_list, R200_str_list, R201, R204, R404, COMMON
 from app.services import rpa_dashboard_service
@@ -83,7 +82,7 @@ def list_rpa_dashboards(
 
 @dashboard_router.get(
     "/monitoring",
-    response_model=list[MonitoringResponse],
+    response_model=PaginatedResponse[MonitoringResponse],
     summary="List all Dashboard monitorings with job info",
     description="Returns all rpa_dashboard_monitoring records with the nested job.",
     responses={
@@ -91,36 +90,36 @@ def list_rpa_dashboards(
     },
 )
 def list_dashboard_monitoring(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     api_key: str = Depends(verify_api_key),
 ):
-    return rpa_dashboard_service.list_dashboard_monitoring(db)
+    return rpa_dashboard_service.list_dashboard_monitoring(db, page=page, page_size=page_size)
 
 
 @dashboard_router.get(
     "/{id_beecker}/errors",
-    response_model=list[str],
+    response_model=PaginatedResponse[str],
     summary="List business errors of the Dashboard bot",
     responses={
-        **R200_str_list(
-            ["Business Exception", "Application Exception"],
-            "List of configured business errors",
-        ),
         **R404,
         **COMMON,
     },
 )
 def list_dashboard_errors(
     id_beecker: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     api_key: str = Depends(verify_api_key),
 ):
-    return rpa_dashboard_service.list_dashboard_errors(db, id_beecker)
+    return rpa_dashboard_service.list_dashboard_errors(db, id_beecker, page=page, page_size=page_size)
 
 
 @dashboard_router.get(
     "/{id_beecker}/monitoring",
-    response_model=list[MonitoringResponse],
+    response_model=PaginatedResponse[MonitoringResponse],
     summary="List monitorings of a Dashboard bot by id_beecker",
     description=(
         "Returns all rpa_dashboard_monitoring records associated with the bot. "
@@ -133,10 +132,12 @@ def list_dashboard_errors(
 )
 def list_monitoring_by_id_beecker(
     id_beecker: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     api_key: str = Depends(verify_api_key),
 ):
-    return rpa_dashboard_service.list_monitoring_by_id_beecker(db, id_beecker)
+    return rpa_dashboard_service.list_monitoring_by_id_beecker(db, id_beecker, page=page, page_size=page_size)
 
 
 @dashboard_router.patch(

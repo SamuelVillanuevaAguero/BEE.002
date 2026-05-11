@@ -1137,7 +1137,7 @@ class BeeckerAPI:
     ) -> List[Dict[str, Any]]:
         """Agrupa mensajes de error por similitud semántica (SequenceMatcher)."""
         groups: List[Dict[str, Any]] = []
-        possible_keys = [details_field, "detalles", "detalle", "step"]
+        possible_keys = [details_field, "detail", "detalles", "detalle", "step"]
 
         for txn in transactions:
             if txn.get(status_field) != failed_value:
