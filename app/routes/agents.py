@@ -2,11 +2,12 @@
 app/routes/agents.py
 CRUD endpoints for AgentMonitoring.
 """
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.utils.auth import verify_api_key
+from app.schemas.response import PaginatedResponse
 from app.schemas.agent import (
     AgentMonitoringCreate,
     AgentMonitoringResponse,
@@ -37,19 +38,21 @@ def create_agent(
 
 @router.get(
     "/",
-    response_model=list[AgentMonitoringResponse],
+    response_model=PaginatedResponse[AgentMonitoringResponse],
     summary="List all agent monitoring configurations",
 )
 def list_agents(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-) -> list[AgentMonitoringResponse]:
+) -> PaginatedResponse[AgentMonitoringResponse]:
     svc = AgentMonitoringService(db)
-    return svc.list_all()
+    return svc.list_all_paginated(page, page_size)
 
 
 @router.get(
     "/by-client/{beecker_id}",
-    response_model=list[AgentMonitoringResponse],
+    response_model=PaginatedResponse[AgentMonitoringResponse],
     summary="List agent monitoring by Beecker client ID",
     description=(
         "Returns all AgentMonitoring configurations associated with a given "
@@ -58,14 +61,16 @@ def list_agents(
 )
 def get_agents_by_client(
     beecker_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-) -> list[AgentMonitoringResponse]:
+) -> PaginatedResponse[AgentMonitoringResponse]:
     svc = AgentMonitoringService(db)
-    return svc.get_by_beecker_id(beecker_id)
+    return svc.get_by_beecker_id_paginated(beecker_id, page, page_size)
 
 @router.get(
     "/by-name/{agent_name}",
-    response_model=list[AgentMonitoringResponse],
+    response_model=PaginatedResponse[AgentMonitoringResponse],
     summary="List agent monitoring by agent name",
     description=(
         "Returns all AgentMonitoring configurations whose agent_name matches "
@@ -74,10 +79,12 @@ def get_agents_by_client(
 )
 def get_agents_by_name(
     agent_name: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-) -> list[AgentMonitoringResponse]:
+) -> PaginatedResponse[AgentMonitoringResponse]:
     svc = AgentMonitoringService(db)
-    return svc.get_by_agent_name(agent_name)
+    return svc.get_by_agent_name_paginated(agent_name, page, page_size)
 
 
 @router.get(
@@ -114,15 +121,14 @@ def update_agent(
 
 @router.delete(
     "/{agent_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete an agent monitoring configuration",
 )
 def delete_agent(
     agent_id: str,
     db: Session = Depends(get_db),
-) -> None:
+) -> dict:
     svc = AgentMonitoringService(db)
-    svc.delete(agent_id)
+    return svc.delete(agent_id)
 
 @router.post(
     "/enable/{agent_id}",

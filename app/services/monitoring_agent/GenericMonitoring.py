@@ -1,0 +1,6 @@
+"""
+"""
+class GenericMonitoring:
+    """
+    """
+    pass

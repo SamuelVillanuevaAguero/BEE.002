@@ -6,7 +6,7 @@ Centralizes all database operations for agent monitoring entities.
 import logging
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.agent_monitoring import AgentMonitoring
@@ -126,3 +126,73 @@ class AgentMonitoringRepository(BaseRepository[AgentMonitoring]):
             True if exists, False otherwise
         """
         return self.exists(agent_id)
+    
+    def list_all_with_job_paginated(
+        self, page: int = 1, page_size: int = 20
+    ) -> dict:
+        """List all agents (job eagerly loaded) with DB-level pagination."""
+        total = self.db.execute(
+            select(func.count()).select_from(AgentMonitoring)
+        ).scalar()
+
+        items = (
+            self.db.execute(
+                select(AgentMonitoring)
+                .options(joinedload(AgentMonitoring.job))
+                .order_by(AgentMonitoring.agent_name)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+            .scalars()
+            .unique()
+            .all()
+        )
+        return {"total": total, "page": page, "page_size": page_size, "items": items}
+
+
+    def get_by_beecker_id_paginated(
+        self, beecker_id: str, page: int = 1, page_size: int = 20
+    ) -> dict:
+        """Get agents for a Beecker client ID with DB-level pagination."""
+        total = self.db.execute(
+            select(func.count())
+            .select_from(AgentMonitoring)
+            .where(AgentMonitoring.beecker_id == beecker_id)
+        ).scalar()
+
+        items = (
+            self.db.execute(
+                select(AgentMonitoring)
+                .where(AgentMonitoring.beecker_id == beecker_id)
+                .order_by(AgentMonitoring.agent_name)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+            .scalars()
+            .all()
+        )
+        return {"total": total, "page": page, "page_size": page_size, "items": items}
+
+
+    def get_by_agent_name_paginated(
+        self, agent_name: str, page: int = 1, page_size: int = 20
+    ) -> dict:
+        """Get agents by name (case-insensitive) with DB-level pagination."""
+        total = self.db.execute(
+            select(func.count())
+            .select_from(AgentMonitoring)
+            .where(AgentMonitoring.agent_name.ilike(agent_name))
+        ).scalar()
+
+        items = (
+            self.db.execute(
+                select(AgentMonitoring)
+                .where(AgentMonitoring.agent_name.ilike(agent_name))
+                .order_by(AgentMonitoring.beecker_id)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+            .scalars()
+            .all()
+        )
+        return {"total": total, "page": page, "page_size": page_size, "items": items}

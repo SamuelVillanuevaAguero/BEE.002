@@ -222,23 +222,25 @@ class AgentMonitoringService:
             )
         return agent
 
-    def list_all(self) -> List[AgentMonitoring]:
-        """List all agent monitoring configurations (job eagerly loaded)."""
-        return self.repo.list_all_with_job()
+    def list_all_paginated(self, page: int = 1, page_size: int = 20) -> dict:
+        """List all agent monitoring configurations with DB-level pagination."""
+        return self.repo.list_all_with_job_paginated(page=page, page_size=page_size)
 
-    def get_by_beecker_id(self, beecker_id: str) -> List[AgentMonitoring]:
-        """
-        Get all agents for a Beecker client ID.
-        Returns empty list if none found (not a 404).
-        """
-        return self.repo.get_by_beecker_id(beecker_id)
+    def get_by_beecker_id_paginated(
+        self, beecker_id: str, page: int = 1, page_size: int = 20
+    ) -> dict:
+        """Get all agents for a Beecker client ID with DB-level pagination."""
+        return self.repo.get_by_beecker_id_paginated(
+            beecker_id=beecker_id, page=page, page_size=page_size
+        )
 
-    def get_by_agent_name(self, agent_name: str) -> List[AgentMonitoring]:
-        """
-        Get all agents matching a name (case-insensitive).
-        Returns empty list if none found (not a 404).
-        """
-        return self.repo.get_by_agent_name(agent_name)
+    def get_by_agent_name_paginated(
+        self, agent_name: str, page: int = 1, page_size: int = 20
+    ) -> dict:
+        """Get all agents matching a name (case-insensitive) with DB-level pagination."""
+        return self.repo.get_by_agent_name_paginated(
+            agent_name=agent_name, page=page, page_size=page_size
+        )
 
     # ------------------------------------------------------------------
     # Update
@@ -312,6 +314,8 @@ class AgentMonitoringService:
             logger.info(
                 f"🗑️  AgentMonitoring deleted | id='{agent_id}' | job_id='{job_id}'"
             )
+
+            return {"details" : f"Agent Monitoring deleted id={agent_id}"}
         except HTTPException:
             raise
         except Exception as e:
