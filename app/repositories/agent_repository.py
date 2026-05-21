@@ -101,6 +101,33 @@ class AgentMonitoringRepository(BaseRepository[AgentMonitoring]):
             .order_by(AgentMonitoring.beecker_id)
         )
         return self.db.execute(stmt).scalars().all()
+    
+    def get_by_name_and_beecker_id(
+        self, agent_name: str, beecker_id: str
+    ) -> Optional[AgentMonitoring]:
+        """
+        Get an agent monitoring configuration by (agent_name, beecker_id).
+ 
+        Comparison is case-insensitive for agent_name and exact for beecker_id.
+        The pair (beecker_id, agent_name) is enforced as unique at the service
+        layer (see AgentMonitoringService.create), so at most one record is
+        expected.
+ 
+        Args:
+            agent_name: The agent name (e.g., "Santiago")
+            beecker_id: The Beecker client ID (e.g., "SLC")
+ 
+        Returns:
+            The AgentMonitoring instance with job eagerly loaded, or None if
+            not found.
+        """
+        stmt = (
+            select(AgentMonitoring)
+            .where(AgentMonitoring.agent_name.ilike(agent_name))
+            .where(AgentMonitoring.beecker_id == beecker_id)
+            .options(joinedload(AgentMonitoring.job))
+        )
+        return self.db.execute(stmt).scalars().unique().first()
 
     def get_by_job_id(self, job_id: str) -> Optional[AgentMonitoring]:
         """

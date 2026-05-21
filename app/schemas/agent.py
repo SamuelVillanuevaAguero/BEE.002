@@ -18,16 +18,33 @@ class AgentTransactionPayload(BaseModel):
     agent_id: str
     account: str
     platform: str
+ 
+    model_config = {"extra": "forbid"}
+ 
+    @field_validator("id", "agent_name", "agent_id", "account", "platform", mode="before")
+    @classmethod
+    def strip_str(cls, v):
+        return v.strip() if isinstance(v, str) else v
 
 
 class AgentTransactionUpdatePayload(BaseModel):
-    """Payload received in PUT /agent/transaction"""
+    """Payload received in PUT /agent/transaction/{transaction_id}"""
     agent_name: str
     agent_id: str
     account: str
     platform: str
     status: str
     details: Optional[str] = None
+ 
+    model_config = {"extra": "forbid"}
+ 
+    @field_validator(
+        "agent_name", "agent_id", "account", "platform", "status", "details",
+        mode="before",
+    )
+    @classmethod
+    def strip_str(cls, v):
+        return v.strip() if isinstance(v, str) else v
 
 
 class TransactionUnit(BaseModel):
